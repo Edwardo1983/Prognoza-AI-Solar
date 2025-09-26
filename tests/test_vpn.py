@@ -162,3 +162,54 @@ def test_start_vpn_adds_admin_hint_when_access_denied(monkeypatch, temp_workspac
     assert result['running'] is False
     assert 'Access is denied' in result['message']
     assert 'Administrator' in result['message']
+
+
+def test_extract_ovpn_assets_default_location(temp_workspace):
+    profile = temp_workspace['default']
+    profile.write_text(
+        """client
+<ca>
+CA
+</ca>
+<cert>
+CERT
+</cert>
+<key>
+KEY
+</key>
+<tls-auth>
+TA
+</tls-auth>
+key-direction 1
+""",
+        encoding='utf-8',
+    )
+
+    result = vpn.extract_ovpn_assets(str(profile))
+
+    output_dir = Path(result['output_dir'])
+    assert output_dir.exists()
+    assert (output_dir / 'Prognoza-UMG-509-PRO.ca.crt').read_text(encoding='utf-8').strip() == 'CA'
+    assert (output_dir / 'Prognoza-UMG-509-PRO.crt').read_text(encoding='utf-8').strip() == 'CERT'
+    assert (output_dir / 'Prognoza-UMG-509-PRO.key').read_text(encoding='utf-8').strip() == 'KEY'
+    assert (output_dir / 'Prognoza-UMG-509-PRO.ta.key').read_text(encoding='utf-8').strip() == 'TA'
+    assert result['key_direction'] == '1'
+
+
+def test_extract_ovpn_assets_custom_directory(temp_workspace, tmp_path):
+    profile = temp_workspace['default']
+    profile.write_text(
+        """client
+<ca>
+CA
+</ca>
+""",
+        encoding='utf-8',
+    )
+    custom_dir = tmp_path / 'out'
+
+    result = vpn.extract_ovpn_assets(str(profile), str(custom_dir))
+
+    assert Path(result['output_dir']) == custom_dir
+    assert (custom_dir / 'Prognoza-UMG-509-PRO.ca.crt').exists()
+    assert result['written']['ca'] == str(custom_dir / 'Prognoza-UMG-509-PRO.ca.crt')

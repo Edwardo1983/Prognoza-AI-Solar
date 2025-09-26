@@ -44,6 +44,14 @@ _LOG_HINTS: List[Tuple[re.Pattern[str], str]] = [
     ),
 ]
 
+SECTION_FILENAMES = {
+    "ca": "{profile}.ca.crt",
+    "cert": "{profile}.crt",
+    "key": "{profile}.key",
+    "tls-auth": "{profile}.ta.key",
+    "tls-crypt": "{profile}.ta.key",
+}
+
 
 def _normalize_profile_name(name: str) -> str:
     """Normalize profile names for fuzzy matching."""
@@ -113,6 +121,76 @@ def _resolve_ovpn_file(ovpn_path: str) -> Tuple[Optional[Path], List[str], Optio
         )
 
     return None, attempted, None
+
+
+
+
+def _extract_section_blocks(config_text: str) -> Dict[str, str]:
+    """Extract inline certificate/key blocks from an OpenVPN profile."""
+    pattern = re.compile(r"<(\w[\w-]*)>(.*?)</\1>", re.DOTALL)
+    blocks: Dict[str, str] = {}
+    for match in pattern.finditer(config_text):
+        section = match.group(1).lower()
+        content = match.group(2).strip()
+        blocks[section] = content
+    return blocks
+
+
+def _extract_key_direction(config_text: str) -> Optional[str]:
+    """Locate key-direction directive if present."""
+    for line in config_text.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("key-direction"):
+            parts = stripped.split()
+            if len(parts) >= 2:
+                return parts[1]
+    return None
+
+
+def extract_ovpn_assets(ovpn_path: str, output_dir: Optional[str] = None) -> Dict[str, object]:
+    """Persist embedded cert/key material from an .ovpn profile."""
+    resolved_path, attempted_paths, resolution_note = _resolve_ovpn_file(ovpn_path)
+    display_input = str(Path(ovpn_path)) if ovpn_path else "<default>"
+
+    if not resolved_path:
+        hint = ""
+        if attempted_paths:
+            hint = f" Checked: {', '.join(attempted_paths)}."
+        return {
+            "source": display_input,
+            "output_dir": None,
+            "written": {},
+            "message": f"Configuration file not found: {display_input}{hint}",
+        }
+
+    config_text = resolved_path.read_text(encoding="utf-8")
+    sections = _extract_section_blocks(config_text)
+    profile = _profile_name(resolved_path)
+    destination = Path(output_dir).expanduser() if output_dir else resolved_path.parent / f"{profile}_assets"
+    destination.mkdir(parents=True, exist_ok=True)
+
+    written: Dict[str, Path] = {}
+    for section, template in SECTION_FILENAMES.items():
+        body = sections.get(section)
+        if not body:
+            continue
+        filename = template.format(profile=profile)
+        target_path = destination / filename
+        target_path.write_text(body + "\n", encoding="utf-8")
+        written[section] = target_path
+
+    key_direction = _extract_key_direction(config_text)
+    message = f"Extracted {len(written)} section(s) to {destination}" if written else "No inline assets found"
+    if resolution_note:
+        message = f"{message} ({resolution_note})"
+
+    return {
+        "source": str(resolved_path),
+        "output_dir": str(destination),
+        "written": {section: str(path) for section, path in written.items()},
+        "key_direction": key_direction,
+        "message": message,
+    }
 
 
 def _read_log_tail(max_bytes: int = LOG_TAIL_BYTES, max_lines: int = LOG_TAIL_MAX_LINES) -> List[str]:
