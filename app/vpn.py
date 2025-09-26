@@ -8,6 +8,7 @@ import re
 import socket
 import subprocess
 import time
+import ctypes
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -51,6 +52,17 @@ SECTION_FILENAMES = {
     "tls-auth": "{profile}.ta.key",
     "tls-crypt": "{profile}.ta.key",
 }
+
+
+
+def _is_windows_admin() -> Optional[bool]:
+    """Return True if the current process has administrative privileges on Windows."""
+    if os.name != "nt":
+        return None
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except OSError:
+        return None
 
 
 def _normalize_profile_name(name: str) -> str:
@@ -212,19 +224,19 @@ def _read_log_tail(max_bytes: int = LOG_TAIL_BYTES, max_lines: int = LOG_TAIL_MA
     return lines
 
 
-def _diagnose_start_failure() -> Optional[str]:
+def _diagnose_start_failure() -> Tuple[Optional[str], Optional[str]]:
     """Inspect the log tail for known failure signatures."""
     lines = _read_log_tail()
     if not lines:
-        return None
+        return None, None
     joined = "\n".join(lines)
     for pattern, message in _LOG_HINTS:
         if pattern.search(joined):
-            return message
+            return message, pattern.pattern
     for line in reversed(lines):
         if "error" in line.lower():
-            return f"Latest OpenVPN log error: {line}"
-    return None
+            return f"Latest OpenVPN log error: {line}", "generic-error"
+    return None, None
 
 
 def _first_existing_path(paths: Iterable[Optional[Path]]) -> Optional[Path]:
@@ -504,6 +516,7 @@ def start_vpn(ovpn_path: str, start_timeout_s: int = 25) -> Dict[str, object]:
     display_input = str(Path(ovpn_path)) if ovpn_path else "<default>"
     profile_source = resolved_path or Path(ovpn_path or settings.DEFAULT_OVPN_PATH)
     profile = _profile_name(profile_source)
+    diagnostics: List[str] = []
 
     if not resolved_path:
         hint = ""
@@ -514,6 +527,7 @@ def start_vpn(ovpn_path: str, start_timeout_s: int = 25) -> Dict[str, object]:
             "method": detection["method"],
             "pid": None,
             "message": f"Configuration file not found: {display_input}{hint}",
+            "diagnostics": diagnostics,
         }
 
     selected_method, error_message = _choose_method(detection, profile, resolved_path)
@@ -524,6 +538,7 @@ def start_vpn(ovpn_path: str, start_timeout_s: int = 25) -> Dict[str, object]:
             "pid": None,
             "message": error_message
             or "OpenVPN executable not found. Install OpenVPN GUI or CLI.",
+            "diagnostics": diagnostics,
         }
 
     start_time = time.time()
@@ -544,6 +559,7 @@ def start_vpn(ovpn_path: str, start_timeout_s: int = 25) -> Dict[str, object]:
             "method": detection["method"],
             "pid": None,
             "message": "Unable to determine how to start OpenVPN.",
+            "diagnostics": diagnostics,
         }
 
     running = False
@@ -567,15 +583,22 @@ def start_vpn(ovpn_path: str, start_timeout_s: int = 25) -> Dict[str, object]:
     if resolution_note:
         base_message = f"{base_message} ({resolution_note})"
     if not running:
-        failure_hint = _diagnose_start_failure()
-        if failure_hint and failure_hint not in base_message:
-            base_message = f"{base_message}. {failure_hint}"
+        failure_hint, failure_code = _diagnose_start_failure()
+        if failure_hint:
+            diagnostics.append(failure_hint)
+            if failure_hint not in base_message:
+                base_message = f"{base_message}. {failure_hint}"
+        admin_status = _is_windows_admin()
+        if failure_hint and "access is denied" in failure_hint.lower() and admin_status is False:
+            diagnostics.append(
+                "Process is not elevated. Run the shell as Administrator or install OpenVPN services to allow TAP and route configuration."
+            )
 
     result_method = selected_method
     if not running and selected_method == "gui" and detection["method"] == "gui" and not detection.get("cli_path"):
         result_method = "gui"
 
-    return {"running": running, "method": result_method, "pid": pid, "message": base_message}
+    return {"running": running, "method": result_method, "pid": pid, "message": base_message, "diagnostics": diagnostics}
 
 
 def stop_vpn(ovpn_path: str) -> Dict[str, object]:

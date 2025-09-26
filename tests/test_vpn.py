@@ -74,6 +74,7 @@ def test_start_vpn_falls_back_to_cli_when_gui_profile_missing(monkeypatch, temp_
     assert result['method'] == 'cli'
     assert result['running'] is True
     assert result['pid'] == 4321
+    assert result['diagnostics'] == []
 
 
 def test_start_vpn_requires_gui_profile_when_cli_unavailable(monkeypatch, temp_workspace):
@@ -94,6 +95,7 @@ def test_start_vpn_requires_gui_profile_when_cli_unavailable(monkeypatch, temp_w
     assert result['running'] is False
     assert result['method'] == 'gui'
     assert 'OpenVPN GUI profile' in result['message']
+    assert result['diagnostics'] == []
 
 
 def test_start_vpn_recovers_from_filename_typo(monkeypatch, temp_workspace):
@@ -119,6 +121,7 @@ def test_start_vpn_recovers_from_filename_typo(monkeypatch, temp_workspace):
     assert result['method'] == 'cli'
     assert result['pid'] == 9876
     assert 'Resolved' in result['message']
+    assert result['diagnostics'] == []
 
 
 def test_start_vpn_reports_missing_config_with_hints(monkeypatch, temp_workspace):
@@ -135,6 +138,7 @@ def test_start_vpn_reports_missing_config_with_hints(monkeypatch, temp_workspace
     assert result['running'] is False
     assert 'Configuration file not found' in result['message']
     assert 'Checked:' in result['message']
+    assert result['diagnostics'] == []
 
 
 def test_start_vpn_adds_admin_hint_when_access_denied(monkeypatch, temp_workspace):
@@ -162,6 +166,8 @@ def test_start_vpn_adds_admin_hint_when_access_denied(monkeypatch, temp_workspac
     assert result['running'] is False
     assert 'Access is denied' in result['message']
     assert 'Administrator' in result['message']
+    assert any('Access is denied' in entry for entry in result['diagnostics'])
+    assert any('Administrator' in entry for entry in result['diagnostics'])
 
 
 def test_extract_ovpn_assets_default_location(temp_workspace):
