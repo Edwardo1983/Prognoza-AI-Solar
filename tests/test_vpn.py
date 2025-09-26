@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app import vpn
+from app import settings, vpn
 
 
 @pytest.fixture(autouse=True)
@@ -68,3 +68,52 @@ def test_start_vpn_requires_gui_profile_when_cli_unavailable(monkeypatch, tmp_pa
     assert result['running'] is False
     assert result['method'] == 'gui'
     assert 'OpenVPN GUI profile' in result['message']
+
+
+
+def test_start_vpn_recovers_from_filename_typo(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    secrets_dir = workspace / "secrets"
+    secrets_dir.mkdir(parents=True)
+    ovpn_file = secrets_dir / "Prognoza-UMG-509-PRO.ovpn"
+    ovpn_file.write_text("client", encoding="utf-8")
+
+    monkeypatch.setattr(settings, "BASE_DIR", workspace)
+    monkeypatch.setattr(settings, "SECRETS_DIR", secrets_dir)
+    monkeypatch.setattr(settings, "DEFAULT_OVPN_PATH", ovpn_file)
+
+    detection = {
+        "method": "gui",
+        "gui_path": Path("C:/Program Files/OpenVPN/bin/openvpn-gui.exe"),
+        "cli_path": Path("C:/Program Files/OpenVPN/bin/openvpn.exe"),
+    }
+
+    monkeypatch.setattr(vpn, "find_openvpn", lambda: detection)
+    monkeypatch.setattr(vpn, "_gui_profile_exists", lambda profile, path: False)
+    monkeypatch.setattr(vpn, "_spawn_openvpn_cli", lambda path, cli: 9876)
+    monkeypatch.setattr(vpn, "_read_pid_file", lambda: None)
+    monkeypatch.setattr(vpn, "_is_process_alive", lambda pid: True)
+    monkeypatch.setattr(vpn, "_tcp_reachable", lambda host, port, timeout=2.0: True)
+
+    result = vpn.start_vpn("secrets/Prognoza-UMG509-PRO.ovpn")
+
+    assert result["running"] is True
+    assert result["method"] == "cli"
+    assert result["pid"] == 9876
+    assert "Resolved" in result["message"]
+
+
+def test_start_vpn_reports_missing_config_with_hints(monkeypatch):
+    detection = {
+        "method": "cli",
+        "gui_path": None,
+        "cli_path": Path("C:/Program Files/OpenVPN/bin/openvpn.exe"),
+    }
+
+    monkeypatch.setattr(vpn, "find_openvpn", lambda: detection)
+
+    result = vpn.start_vpn("missing-profile.ovpn")
+
+    assert result["running"] is False
+    assert "Configuration file not found" in result["message"]
+    assert "Checked:" in result["message"]
