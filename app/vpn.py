@@ -79,6 +79,7 @@ def find_openvpn() -> Dict[str, Optional[Path]]:
         method = "gui"
     elif cli_path:
         method = "cli"
+
     else:
         method = "missing"
 
@@ -181,6 +182,7 @@ def _build_cli_state(expected_pid: Optional[int] = None) -> _CliState:
         last_error=failure_reason,
         last_log_line=last_log_line,
     )
+
 
 
 def _find_openvpn_process_for_profile(profile: str) -> Optional[psutil.Process]:
@@ -449,7 +451,6 @@ def vpn_status(ovpn_path: str) -> Dict[str, object]:
     ovpn_file = Path(ovpn_path)
     detection = find_openvpn()
     profile = _profile_name(ovpn_file)
-
     pid: Optional[int] = None
     running = False
 
