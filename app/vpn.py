@@ -12,7 +12,7 @@ from typing import Dict, Optional
 import psutil
 import shutil
 
-from . import settings
+from app import settings
 
 OPENVPN_HOST = settings.VPN_HEALTH_HOST
 OPENVPN_PORT = settings.VPN_HEALTH_PORT
