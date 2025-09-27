@@ -11,11 +11,6 @@ from typing import Dict, Optional, Tuple
 
 import psutil
 
-try:
-    import netifaces  # type: ignore
-except ImportError:  # pragma: no cover - optional dependency
-    netifaces = None  # type: ignore
-
 from app import ovpn_config, settings
 from app.openvpn_manager import OpenVPNManager
 
@@ -186,63 +181,14 @@ class VPNConnection:
         return False, ping_ok, tcp_ok
 
     def _get_vpn_ip(self) -> Optional[str]:
-        candidates: list[str] = []
-
-        for name, addrs in psutil.net_if_addrs().items():
-            lower_name = name.lower()
-            if not any(token in lower_name for token in ("tap", "tun", "vpn", "openvpn")):
-                continue
-            for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    ip_addr = getattr(addr, "address", None)
-                    if ip_addr and not ip_addr.startswith(("0.", "169.254.")):
-                        candidates.append(ip_addr)
-
-        if candidates:
-            return candidates[0]
-
-        if netifaces:
-            for iface in netifaces.interfaces():
-                lower_name = iface.lower()
-                if not any(token in lower_name for token in ("tap", "tun", "vpn", "openvpn")):
-                    continue
-                addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
-                for entry in addrs:
-                    ip_addr = entry.get("addr")
-                    if ip_addr and not ip_addr.startswith(("0.", "169.254.")):
-                        candidates.append(ip_addr)
-            if candidates:
-                return candidates[0]
-
-        try:
-            result = subprocess.run(
-                ["ipconfig"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError:
-            return None
-
-        adapter_re = re.compile(r"adapter", re.IGNORECASE)
-        ip_re = re.compile(r"(\d{1,3}\.){3}\d{1,3}")
-        in_vpn_block = False
-
-        for raw_line in result.stdout.splitlines():
-            stripped = raw_line.strip()
-            if not stripped:
-                in_vpn_block = False
-                continue
-            if adapter_re.search(raw_line) and not raw_line.startswith(" "):
-                lower_line = raw_line.lower()
-                in_vpn_block = any(token in lower_line for token in ("tap", "tun", "vpn", "openvpn"))
-                continue
-            if in_vpn_block and "ipv4" in stripped.lower():
-                match = ip_re.search(stripped)
-                if match:
-                    ip_addr = match.group()
-                    if not ip_addr.startswith(("0.", "169.254.")):
-                        return ip_addr
+        """Detect the IPv4 address of the TAP/TUN adapter using psutil only."""
+        for iface, addrs in psutil.net_if_addrs().items():
+            upper_iface = iface.upper()
+            if "TAP" in upper_iface or "TUN" in upper_iface or "OPENVPN" in upper_iface:
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:
+                        return addr.address
+        self._logger.warning("VPN IP not found — check if OpenVPN tunnel is up.")
         return None
 
     def _ping_host(self, host: str, timeout_ms: int = 1000) -> bool:
