@@ -11,3 +11,29 @@
 2025-09-28 00:46:47,428 INFO app.vpn_connection Disconnect command sent for profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean
 2025-09-28 00:46:51,080 INFO app.vpn_connection Profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean disconnected
 2025-09-28 00:46:51,209 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:52:21,112 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\eduard.ordean@el-mont.ro-Brezoaia-PT-clean.ovpn
+2025-09-28 00:52:21,174 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=18392)
+2025-09-28 00:52:23,231 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:52:25,243 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:52:28,253 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:52:32,768 INFO app.vpn_connection Obtained VPN interface IP 192.168.255.10
+2025-09-28 00:52:39,406 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
+2025-09-28 00:52:41,748 INFO app.vpn_connection UMG health attempt 2: ping=True tcp=True
+2025-09-28 00:52:41,748 INFO app.vpn_connection VPN connected: ip=192.168.255.10 ping=True tcp=True pid=19472
+2025-09-28 00:53:01,812 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
+2025-09-28 00:53:11,834 INFO app.vpn_connection UMG health attempt 1: ping=True tcp=True
+2025-09-28 00:53:20,910 INFO app.vpn_connection Disconnect command sent for profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean
+2025-09-28 00:53:24,528 INFO app.vpn_connection Profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean disconnected
+2025-09-28 00:53:24,571 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:59:21,406 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\eduard.ordean@el-mont.ro-Brezoaia-PT-clean.ovpn
+2025-09-28 00:59:21,486 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=17744)
+2025-09-28 00:59:23,573 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:59:25,586 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:59:28,602 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-28 00:59:33,120 INFO app.vpn_connection Obtained VPN interface IP 192.168.255.10
+2025-09-28 00:59:36,914 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
+2025-09-28 00:59:39,268 INFO app.vpn_connection UMG health attempt 2: ping=True tcp=True
+2025-09-28 00:59:39,273 INFO app.vpn_connection VPN connected: ip=192.168.255.10 ping=True tcp=True pid=21792
+2025-09-28 00:59:52,511 INFO app.vpn_connection Disconnect command sent for profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean
+2025-09-28 00:59:56,110 INFO app.vpn_connection Profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean disconnected
+2025-09-28 00:59:56,151 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
