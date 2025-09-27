@@ -1,722 +1,84 @@
-
-"""Utilities for managing an OpenVPN tunnel on demand."""
+"""Command-line interface for managing the OpenVPN GUI connection."""
 from __future__ import annotations
 
-import os
-import platform
-import re
-import socket
-import subprocess
-import time
-import ctypes
-from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
-
-import psutil
-import shutil
+import argparse
+import json
+import logging
+import sys
+from logging.handlers import RotatingFileHandler
+from typing import Any, Dict, Optional
 
 from app import settings
-
-OPENVPN_HOST = settings.VPN_HEALTH_HOST
-OPENVPN_PORT = settings.VPN_HEALTH_PORT
-
-PREFERRED_METHOD_ENV = "OPENVPN_PREFERRED_METHOD"
-CLI_OVERRIDE_ENV = "OPENVPN_CLI_PATH"
-GUI_OVERRIDE_ENV = "OPENVPN_GUI_PATH"
-
-LOG_TAIL_BYTES = 8192
-LOG_TAIL_MAX_LINES = 120
-
-_LOG_HINTS: List[Tuple[re.Pattern[str], str]] = [
-    (
-        re.compile(r"Access is denied", re.IGNORECASE),
-        (
-            "Windows blocked TAP driver or routing changes (Access is denied). "
-            "Run the command shell as Administrator or install the OpenVPN service."
-        ),
-    ),
-    (
-        re.compile(r"AUTH_FAILED", re.IGNORECASE),
-        "Authentication failed. Verify the VPN credentials or certificate permissions.",
-    ),
-    (
-        re.compile(r"certificate verify failed", re.IGNORECASE),
-        "Certificate validation failed. Check CA and client certificate files.",
-    ),
-]
-
-SECTION_FILENAMES = {
-    "ca": "{profile}.ca.crt",
-    "cert": "{profile}.crt",
-    "key": "{profile}.key",
-    "tls-auth": "{profile}.ta.key",
-    "tls-crypt": "{profile}.ta.key",
-}
+from app.vpn_connection import VPNConnection
 
 
+def _configure_logging() -> None:
+    """Configure application logging with rotation and console echo."""
+    settings.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        settings.LOG_FILE,
+        maxBytes=1_000_000,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    console_handler = logging.StreamHandler(sys.stdout)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[handler, console_handler],
+        force=True,
+    )
 
-def _is_windows_admin() -> Optional[bool]:
-    """Return True if the current process has administrative privileges on Windows."""
-    if os.name != "nt":
-        return None
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Manage the OpenVPN GUI connection for UMG 509 PRO.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--connect", action="store_true", help="Create or refresh the VPN tunnel.")
+    group.add_argument("--disconnect", action="store_true", help="Tear down the active VPN tunnel.")
+    group.add_argument("--status", action="store_true", help="Report VPN tunnel status as JSON.")
+    return parser
+
+
+def _emit(result: Dict[str, Any]) -> None:
+    print(json.dumps(result, indent=2))
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    """Entry point for the VPN CLI."""
+    _configure_logging()
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    connection = VPNConnection()
+
     try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except OSError:
-        return None
-
-
-def _normalize_profile_name(name: str) -> str:
-    """Normalize profile names for fuzzy matching."""
-    return "".join(ch for ch in name.lower() if ch.isalnum())
-
-
-def _resolve_ovpn_file(ovpn_path: str) -> Tuple[Optional[Path], List[str], Optional[str]]:
-    """Resolve a user-supplied path to an existing .ovpn file."""
-    raw_path = Path(ovpn_path).expanduser()
-    candidates: List[Path] = []
-    attempted: List[str] = []
-
-    def _register_candidate(path: Path) -> None:
-        candidate = path.expanduser()
-        try:
-            candidate = candidate.resolve(strict=False)
-        except OSError:
-            pass
-        if candidate not in candidates:
-            candidates.append(candidate)
-            attempted.append(str(candidate))
-
-    _register_candidate(raw_path)
-    if raw_path.suffix.lower() != ".ovpn":
-        _register_candidate(raw_path.with_suffix(".ovpn"))
-    if not raw_path.is_absolute():
-        base_candidate = settings.BASE_DIR / raw_path
-        _register_candidate(base_candidate)
-        if raw_path.suffix.lower() != ".ovpn":
-            _register_candidate((settings.BASE_DIR / raw_path).with_suffix(".ovpn"))
-
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate, attempted, None
-
-    target_name = raw_path.name if raw_path.name not in {"", "."} else ""
-    normalized_target = _normalize_profile_name(Path(target_name).stem or target_name)
-
-    if normalized_target:
-        search_dirs = {candidate.parent for candidate in candidates if candidate.parent}
-        search_dirs.add(settings.SECRETS_DIR)
-        for directory in list(search_dirs):
-            if not directory.exists():
-                continue
-            for file in directory.glob("*.ovpn"):
-                if _normalize_profile_name(file.stem) == normalized_target:
-                    try:
-                        resolved_file = file.resolve(strict=False)
-                    except OSError:
-                        resolved_file = file
-                    return (
-                        resolved_file,
-                        attempted,
-                        f"Resolved '{ovpn_path}' to '{resolved_file}'",
-                    )
-
-    default_file = settings.DEFAULT_OVPN_PATH
-    if not ovpn_path and default_file.exists():
-        try:
-            resolved_default = default_file.resolve(strict=False)
-        except OSError:
-            resolved_default = default_file
-        return (
-            resolved_default,
-            attempted,
-            f"Using default configuration at '{resolved_default}'",
-        )
-
-    return None, attempted, None
-
-
-
-
-def _extract_section_blocks(config_text: str) -> Dict[str, str]:
-    """Extract inline certificate/key blocks from an OpenVPN profile."""
-    pattern = re.compile(r"<(\w[\w-]*)>(.*?)</\1>", re.DOTALL)
-    blocks: Dict[str, str] = {}
-    for match in pattern.finditer(config_text):
-        section = match.group(1).lower()
-        content = match.group(2).strip()
-        blocks[section] = content
-    return blocks
-
-
-def _extract_key_direction(config_text: str) -> Optional[str]:
-    """Locate key-direction directive if present."""
-    for line in config_text.splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith("key-direction"):
-            parts = stripped.split()
-            if len(parts) >= 2:
-                return parts[1]
-    return None
-
-
-def extract_ovpn_assets(ovpn_path: str, output_dir: Optional[str] = None) -> Dict[str, object]:
-    """Persist embedded cert/key material from an .ovpn profile."""
-    resolved_path, attempted_paths, resolution_note = _resolve_ovpn_file(ovpn_path)
-    display_input = str(Path(ovpn_path)) if ovpn_path else "<default>"
-
-    if not resolved_path:
-        hint = ""
-        if attempted_paths:
-            hint = f" Checked: {', '.join(attempted_paths)}."
-        return {
-            "source": display_input,
-            "output_dir": None,
-            "written": {},
-            "message": f"Configuration file not found: {display_input}{hint}",
-        }
-
-    config_text = resolved_path.read_text(encoding="utf-8")
-    sections = _extract_section_blocks(config_text)
-    profile = _profile_name(resolved_path)
-    destination = Path(output_dir).expanduser() if output_dir else resolved_path.parent / f"{profile}_assets"
-    destination.mkdir(parents=True, exist_ok=True)
-
-    written: Dict[str, Path] = {}
-    for section, template in SECTION_FILENAMES.items():
-        body = sections.get(section)
-        if not body:
-            continue
-        filename = template.format(profile=profile)
-        target_path = destination / filename
-        target_path.write_text(body + "\n", encoding="utf-8")
-        written[section] = target_path
-
-    key_direction = _extract_key_direction(config_text)
-    message = f"Extracted {len(written)} section(s) to {destination}" if written else "No inline assets found"
-    if resolution_note:
-        message = f"{message} ({resolution_note})"
-
-    return {
-        "source": str(resolved_path),
-        "output_dir": str(destination),
-        "written": {section: str(path) for section, path in written.items()},
-        "key_direction": key_direction,
-        "message": message,
-    }
-
-
-def _read_log_tail(max_bytes: int = LOG_TAIL_BYTES, max_lines: int = LOG_TAIL_MAX_LINES) -> List[str]:
-    """Return the last portion of the OpenVPN log file."""
-    path = settings.VPN_LOG_FILE
-    if not path.exists():
-        return []
-    try:
-        with path.open("rb") as handle:
-            handle.seek(0, os.SEEK_END)
-            size = handle.tell()
-            handle.seek(max(0, size - max_bytes), os.SEEK_SET)
-            data = handle.read().decode("utf-8", errors="ignore")
-    except OSError:
-        return []
-    lines = data.splitlines()
-    if len(lines) > max_lines:
-        return lines[-max_lines:]
-    return lines
-
-
-def _diagnose_start_failure() -> Tuple[Optional[str], Optional[str]]:
-    """Inspect the log tail for known failure signatures."""
-    lines = _read_log_tail()
-    if not lines:
-        return None, None
-    joined = "\n".join(lines)
-    for pattern, message in _LOG_HINTS:
-        if pattern.search(joined):
-            return message, pattern.pattern
-    for line in reversed(lines):
-        if "error" in line.lower():
-            return f"Latest OpenVPN log error: {line}", "generic-error"
-    return None, None
-
-
-def _first_existing_path(paths: Iterable[Optional[Path]]) -> Optional[Path]:
-    """Return the first existing executable path from an iterable."""
-    seen: set[Path] = set()
-    for candidate in paths:
-        if not candidate:
-            continue
-        path = candidate.expanduser()
-        if not path.exists() or not path.is_file():
-            continue
-        try:
-            resolved = path.resolve()
-        except OSError:
-            resolved = path
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        if os.name != "nt" and not os.access(resolved, os.X_OK):
-            continue
-        return resolved
-    return None
-
-
-def _find_openvpn_gui() -> Optional[Path]:
-    """Attempt to locate the OpenVPN GUI executable on Windows systems."""
-    override = os.environ.get(GUI_OVERRIDE_ENV)
-    if override:
-        override_path = Path(override).expanduser()
-        if override_path.is_file():
-            return override_path.resolve()
-
-    candidates: List[Path] = []
-    if platform.system().lower() == "windows":
-        env_keys = ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]
-        for key in env_keys:
-            base = os.environ.get(key)
-            if base:
-                candidates.append(Path(base) / "OpenVPN" / "bin" / "openvpn-gui.exe")
-
-    for path_entry in os.environ.get("PATH", "").split(os.pathsep):
-        if path_entry:
-            base_path = Path(path_entry)
-            candidates.append(base_path / "openvpn-gui.exe")
-            candidates.append(base_path / "OpenVPN-GUI.exe")
-
-    return _first_existing_path(candidates)
-
-
-def _find_openvpn_cli(gui_hint: Optional[Path] = None) -> Optional[Path]:
-    """Locate the OpenVPN CLI binary."""
-    override = os.environ.get(CLI_OVERRIDE_ENV)
-    exe_name = "openvpn.exe" if os.name == "nt" else "openvpn"
-
-    candidates: List[Path] = []
-    if override:
-        candidates.append(Path(override).expanduser())
-
-    which = shutil.which("openvpn")
-    if which:
-        candidates.append(Path(which))
-
-    if gui_hint:
-        candidates.append(gui_hint.parent / exe_name)
-
-    if os.name == "nt":
-        env_keys = ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "ProgramData", "USERPROFILE"]
-        for key in env_keys:
-            base = os.environ.get(key)
-            if base:
-                candidates.append(Path(base) / "OpenVPN" / "bin" / exe_name)
-    else:
-        candidates.extend(
-            Path(path)
-            for path in (
-                "/usr/sbin/openvpn",
-                "/usr/local/sbin/openvpn",
-                "/usr/local/bin/openvpn",
-                "/opt/homebrew/sbin/openvpn",
-                "/opt/homebrew/bin/openvpn",
-            )
-        )
-
-    return _first_existing_path(candidates)
-
-
-def _gui_config_dirs() -> List[Path]:
-    """Return known directories where OpenVPN GUI looks for profiles."""
-    if platform.system().lower() != "windows":
-        return []
-
-    bases: List[Path] = []
-    for key in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "ProgramData", "USERPROFILE"):
-        base = os.environ.get(key)
-        if base:
-            bases.append(Path(base))
-    bases.append(Path.home())
-
-    directories: List[Path] = []
-    for base in bases:
-        for suffix in ("config", "config-auto"):
-            candidate = base / "OpenVPN" / suffix
-            if candidate not in directories:
-                directories.append(candidate)
-    return directories
-
-
-def _gui_profile_exists(profile: str, ovpn_path: Path) -> bool:
-    """Return True if the profile is available to the OpenVPN GUI."""
-    expected_name = f"{profile}.ovpn"
-    try:
-        resolved_file = ovpn_path.resolve()
-    except OSError:
-        resolved_file = ovpn_path
-
-    for directory in _gui_config_dirs():
-        candidate = directory / expected_name
-        if candidate.exists():
-            return True
-        try:
-            if resolved_file.is_relative_to(directory):
-                return True
-        except AttributeError:
-            try:
-                resolved_file.relative_to(directory)
-            except ValueError:
-                pass
-            else:
-                return True
-        except ValueError:
-            continue
-    return False
-
-
-def _choose_method(
-    detection: Dict[str, Optional[Path]], profile: str, ovpn_file: Path
-) -> Tuple[str, Optional[str]]:
-    """Pick the most reliable method to control OpenVPN."""
-    method = detection["method"]
-    gui_path = detection.get("gui_path")
-    cli_path = detection.get("cli_path")
-
-    if method == "gui":
-        if not gui_path:
-            return "missing", "OpenVPN GUI executable not found. Install OpenVPN GUI."
-        if not _gui_profile_exists(profile, ovpn_file):
-            if cli_path:
-                return "cli", None
-            hint_dirs = [str(path) for path in _gui_config_dirs()]
-            hint_text = ", ".join(hint_dirs) if hint_dirs else r"%ProgramFiles%\OpenVPN\config"
-            return (
-                "missing",
-                (
-                    f"OpenVPN GUI profile '{profile}' not found. Move {ovpn_file.name} into one of: {hint_text}, "
-                    "or expose the CLI binary by adding it to PATH."
-                ),
-            )
-        return "gui", None
-
-    if method == "cli":
-        if not cli_path:
-            return "missing", "OpenVPN CLI executable not found. Install OpenVPN or add it to PATH."
-        return "cli", None
-
-    if method == "missing":
-        return "missing", "OpenVPN executable not found. Install OpenVPN GUI or CLI."
-
-    return method, None
-
-
-def find_openvpn() -> Dict[str, Optional[Path]]:
-    """Detect available OpenVPN entry points."""
-    gui_path = _find_openvpn_gui()
-    cli_path = _find_openvpn_cli(gui_path)
-    preferred = os.environ.get(PREFERRED_METHOD_ENV, "").strip().lower()
-
-    if preferred == "gui" and gui_path:
-        method = "gui"
-    elif preferred == "cli" and cli_path:
-        method = "cli"
-    elif cli_path:
-        method = "cli"
-    elif gui_path:
-        method = "gui"
-    else:
-        method = "missing"
-
-    return {"method": method, "gui_path": gui_path, "cli_path": cli_path}
-
-
-def _profile_name(ovpn_path: Path) -> str:
-    return ovpn_path.stem
-
-
-def _tcp_reachable(host: str, port: int, timeout: float = 2.0) -> bool:
-    """Check whether a TCP connection can be established."""
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
-def _is_process_alive(pid: int) -> bool:
-    try:
-        process = psutil.Process(pid)
-        return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-        return False
-
-
-def _find_openvpn_process_for_profile(profile: str) -> Optional[psutil.Process]:
-    profile_lower = profile.lower()
-    for proc in psutil.process_iter(["name", "cmdline"]):
-        try:
-            name = (proc.info.get("name") or "").lower()
-            cmdline = " ".join(proc.info.get("cmdline") or []).lower()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-        if "openvpn" in name or "openvpn" in cmdline:
-            if profile_lower in cmdline or profile_lower in name:
-                return proc
-    return None
-
-
-def _write_pid_file(pid: int) -> None:
-    settings.VPN_PID_FILE.write_text(str(pid), encoding="utf-8")
-
-
-def _read_pid_file() -> Optional[int]:
-    if not settings.VPN_PID_FILE.exists():
-        return None
-    try:
-        return int(settings.VPN_PID_FILE.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
-
-
-def _remove_pid_file() -> None:
-    if settings.VPN_PID_FILE.exists():
-        try:
-            settings.VPN_PID_FILE.unlink()
-        except OSError:
-            pass
-
-
-def _spawn_openvpn_cli(ovpn_path: Path, cli_path: Path) -> Optional[int]:
-    """Launch the OpenVPN CLI in a detached subprocess."""
-    creationflags = 0
-    preexec_fn = None
-    if os.name == "nt":  # pragma: win32-no-cover
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
-            subprocess, "DETACHED_PROCESS", 0
-        )
-    else:
-        preexec_fn = os.setsid  # type: ignore[attr-defined]
-
-    settings.VPN_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with settings.VPN_LOG_FILE.open("ab") as log_handle:
-        process = subprocess.Popen(  # noqa: S603,S607
-            [str(cli_path), "--config", str(ovpn_path)],
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            creationflags=creationflags,
-            preexec_fn=preexec_fn,
-            close_fds=True,
-        )
-    _write_pid_file(process.pid)
-    return process.pid
-
-
-def start_vpn(ovpn_path: str, start_timeout_s: int = 25) -> Dict[str, object]:
-    """Start an OpenVPN tunnel if possible."""
-    resolved_path, attempted_paths, resolution_note = _resolve_ovpn_file(ovpn_path)
-    detection = find_openvpn()
-    display_input = str(Path(ovpn_path)) if ovpn_path else "<default>"
-    profile_source = resolved_path or Path(ovpn_path or settings.DEFAULT_OVPN_PATH)
-    profile = _profile_name(profile_source)
-    diagnostics: List[str] = []
-
-    if not resolved_path:
-        hint = ""
-        if attempted_paths:
-            hint = f" Checked: {', '.join(attempted_paths)}."
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": f"Configuration file not found: {display_input}{hint}",
-            "diagnostics": diagnostics,
-        }
-
-    selected_method, error_message = _choose_method(detection, profile, resolved_path)
-    if selected_method == "missing":
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": error_message
-            or "OpenVPN executable not found. Install OpenVPN GUI or CLI.",
-            "diagnostics": diagnostics,
-        }
-
-    start_time = time.time()
-    pid: Optional[int] = None
-
-    if selected_method == "gui" and detection["gui_path"]:
-        command = [str(detection["gui_path"]), "--command", "connect", profile]
-        subprocess.run(command, check=False)  # noqa: S603
-    elif selected_method == "cli" and detection["cli_path"]:
-        existing_pid = _read_pid_file()
-        if existing_pid and _is_process_alive(existing_pid):
-            pid = existing_pid
-        else:
-            pid = _spawn_openvpn_cli(resolved_path, detection["cli_path"])
-    else:
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": "Unable to determine how to start OpenVPN.",
-            "diagnostics": diagnostics,
-        }
-
-    running = False
-    while time.time() - start_time < start_timeout_s:
-        time.sleep(1)
-        if selected_method == "gui":
-            process = _find_openvpn_process_for_profile(profile)
-            running = process is not None
-            if running:
-                pid = process.pid
-        else:
-            pid = pid or _read_pid_file()
-            running = bool(pid and _is_process_alive(pid))
-
-        if running and _tcp_reachable(OPENVPN_HOST, OPENVPN_PORT):
-            break
-    else:
-        running = running and _tcp_reachable(OPENVPN_HOST, OPENVPN_PORT)
-
-    base_message = "VPN started" if running else "VPN failed to start or is unreachable"
-    if resolution_note:
-        base_message = f"{base_message} ({resolution_note})"
-    if not running:
-        failure_hint, failure_code = _diagnose_start_failure()
-        if failure_hint:
-            diagnostics.append(failure_hint)
-            if failure_hint not in base_message:
-                base_message = f"{base_message}. {failure_hint}"
-        admin_status = _is_windows_admin()
-        if failure_hint and "access is denied" in failure_hint.lower() and admin_status is False:
-            diagnostics.append(
-                "Process is not elevated. Run the shell as Administrator or install OpenVPN services to allow TAP and route configuration."
-            )
-
-    result_method = selected_method
-    if not running and selected_method == "gui" and detection["method"] == "gui" and not detection.get("cli_path"):
-        result_method = "gui"
-
-    return {"running": running, "method": result_method, "pid": pid, "message": base_message, "diagnostics": diagnostics}
-
-
-def stop_vpn(ovpn_path: str) -> Dict[str, object]:
-    """Stop the OpenVPN tunnel if it is running."""
-    resolved_path, attempted_paths, _ = _resolve_ovpn_file(ovpn_path)
-    detection = find_openvpn()
-    display_input = str(Path(ovpn_path)) if ovpn_path else "<default>"
-    profile_source = resolved_path or Path(ovpn_path or settings.DEFAULT_OVPN_PATH)
-    profile = _profile_name(profile_source)
-
-    if not resolved_path:
-        hint = ""
-        if attempted_paths:
-            hint = f" Checked: {', '.join(attempted_paths)}."
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": f"Configuration file not found: {display_input}{hint}",
-        }
-
-    method, error_message = _choose_method(detection, profile, resolved_path)
-    if method == "missing":
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": error_message or "OpenVPN executable not found.",
-        }
-
-    if method == "gui" and detection["gui_path"]:
-        command = [str(detection["gui_path"]), "--command", "disconnect", profile]
-        subprocess.run(command, check=False)  # noqa: S603
-        time.sleep(2)
-        process = _find_openvpn_process_for_profile(profile)
-        running = process is not None
-        pid = process.pid if process else None
-        message = "Disconnect command issued via GUI"
-    elif method == "cli":
-        pid = _read_pid_file()
-        if not pid:
-            return {
-                "running": False,
-                "method": "cli",
-                "pid": None,
-                "message": "No PID recorded; VPN CLI does not appear to be running.",
+        if args.connect:
+            result = connection.connect()
+            _emit(result)
+        elif args.disconnect:
+            connection.disconnect()
+            result = connection.status()
+            _emit(result)
+        elif args.status:
+            result = connection.status()
+            _emit(result)
+    except FileNotFoundError as exc:
+        logging.getLogger(__name__).error("%s", exc)
+        _emit(
+            {
+                "is_connected": False,
+                "error": str(exc),
+                "profile_name": settings.PROFILE_NAME,
+                "log_path": str(settings.LOG_FILE),
             }
-        try:
-            process = psutil.Process(pid)
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except psutil.TimeoutExpired:
-                process.kill()
-        except psutil.NoSuchProcess:
-            pass
-        _remove_pid_file()
-        running = False
-        message = "VPN CLI process terminated"
-        pid = None
-    else:
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": "OpenVPN executable not found.",
-        }
+        )
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).exception("Unhandled error: %s", exc)
+        _emit({"error": str(exc), "profile_name": settings.PROFILE_NAME})
+        return 1
 
-    return {"running": running, "method": method, "pid": pid, "message": message}
+    return 0
 
 
-def vpn_status(ovpn_path: str) -> Dict[str, object]:
-    """Return the current status of the VPN connection."""
-    resolved_path, attempted_paths, _ = _resolve_ovpn_file(ovpn_path)
-    detection = find_openvpn()
-    display_input = str(Path(ovpn_path)) if ovpn_path else "<default>"
-    profile_source = resolved_path or Path(ovpn_path or settings.DEFAULT_OVPN_PATH)
-    profile = _profile_name(profile_source)
-
-    if not resolved_path:
-        hint = ""
-        if attempted_paths:
-            hint = f" Checked: {', '.join(attempted_paths)}."
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": f"Configuration file not found: {display_input}{hint}",
-        }
-
-    method, error_message = _choose_method(detection, profile, resolved_path)
-    if method == "missing":
-        return {
-            "running": False,
-            "method": detection["method"],
-            "pid": None,
-            "message": error_message or "OpenVPN executable not found.",
-        }
-
-    pid: Optional[int] = None
-    running = False
-
-    if method == "gui":
-        process = _find_openvpn_process_for_profile(profile)
-        running = process is not None
-        pid = process.pid if process else None
-    elif method == "cli":
-        pid = _read_pid_file()
-        running = bool(pid and _is_process_alive(pid))
-    else:
-        running = False
-
-    reachable = _tcp_reachable(OPENVPN_HOST, OPENVPN_PORT) if running else False
-    message = "VPN reachable" if reachable else "VPN not connected"
-
-    return {
-        "running": running and reachable,
-        "method": method,
-        "pid": pid,
-        "message": message,
-    }
+if __name__ == "__main__":
+    raise SystemExit(main())

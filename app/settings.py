@@ -1,26 +1,18 @@
-"""Application settings and filesystem bootstrap for Prognoza AI Solar."""
+"""Application-wide settings for the VPN automation toolkit."""
 from __future__ import annotations
 
 from pathlib import Path
 
-# Base directories
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-RAW_DATA_DIR = DATA_DIR / "raw"
-EXPORTS_DIR = DATA_DIR / "exports"
+BASE_DIR = Path(__file__).resolve().parents[1]
+DATA_DIR = BASE_DIR / "app" / "data" / "raw"
+LOG_FILE = DATA_DIR / "vpn.log"
 SECRETS_DIR = BASE_DIR / "secrets"
+OVPN_INPUT = SECRETS_DIR / "Prognoza-UMG-509-PRO.ovpn"
+OVPN_ASSETS_DIR = SECRETS_DIR / "Prognoza-UMG-509-PRO_assets"
+PROFILE_NAME = "Prognoza-UMG-509-PRO-clean"
+UMG_IP = "192.168.1.30"
+UMG_TCP_PORT = 502
+CONNECT_TIMEOUT_S = 90
 
-# Ensure required directories exist at import time.
-for directory in (DATA_DIR, RAW_DATA_DIR, EXPORTS_DIR, SECRETS_DIR):
+for directory in (DATA_DIR, OVPN_ASSETS_DIR):
     directory.mkdir(parents=True, exist_ok=True)
-
-# Default location of the OpenVPN configuration file.
-DEFAULT_OVPN_PATH = SECRETS_DIR / "Prognoza-UMG-509-PRO.ovpn"
-
-# Runtime files for CLI management.
-VPN_LOG_FILE = RAW_DATA_DIR / "vpn.log"
-VPN_PID_FILE = RAW_DATA_DIR / "vpn.pid"
-
-# Constants for health checks.
-VPN_HEALTH_HOST = "192.168.1.30"
-VPN_HEALTH_PORT = 80
