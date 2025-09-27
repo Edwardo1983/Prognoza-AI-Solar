@@ -122,10 +122,11 @@ class OpenVPNManager:
                 process.terminate()
                 process.wait(timeout=10)
                 self._logger.debug("Terminated lingering openvpn.exe pid=%s", process.pid)
-            except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+            except (psutil.NoSuchProcess, psutil.TimeoutExpired, psutil.AccessDenied):
                 try:
                     process.kill()
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    self._logger.debug("Unable to forcefully terminate openvpn.exe pid=%s", process.pid)
                     pass
 
     def stop_all(self) -> None:

@@ -80,11 +80,64 @@ def generate_clean_config(original_text: str, assets_dir: Path, umg_ip: str, pro
             _remove_existing(directive.split()[0])
             effective_lines.append(directive)
 
+    optimization_keywords = (
+        'dev ',
+        'proto ',
+        'cipher ',
+        'data-ciphers',
+        'auth ',
+        'comp-lzo',
+        'compress',
+        'resolv-retry',
+        'ping ',
+        'ping-restart',
+        'ping-timer-rem',
+        'server-poll-timeout',
+        'explicit-exit-notify',
+        'setenv opt',
+        'tun-mtu',
+        'mssfix',
+    )
+    effective_lines = [
+        line
+        for line in effective_lines
+        if not any(line.strip().lower().startswith(keyword) for keyword in optimization_keywords)
+    ]
+
+    def _ensure_directive(value: str) -> None:
+        lower_value = value.lower()
+        if not any(existing.strip().lower() == lower_value for existing in effective_lines):
+            effective_lines.append(value)
+
     route_directive = f"route {umg_ip} 255.255.255.255"
     if not any(line.strip().lower().startswith(f"route {umg_ip.lower()}") for line in effective_lines):
         effective_lines.append(route_directive)
 
-    clean_text = "\n".join(effective_lines).strip() + "\n"
+    optimized_directives = [
+        'client',
+        'dev tun',
+        'proto udp',
+        'nobind',
+        'remote-cert-tls server',
+        'resolv-retry infinite',
+        'setenv opt block-outside-dns',
+        'cipher AES-256-GCM',
+        'ncp-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC',
+        'data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC',
+        'data-ciphers-fallback AES-256-CBC',
+        'tun-mtu 1500',
+        'mssfix 1360',
+        'ping 10',
+        'ping-restart 60',
+        'ping-timer-rem',
+        'server-poll-timeout 10',
+        'explicit-exit-notify 2',
+    ]
+
+    for directive in optimized_directives:
+        _ensure_directive(directive)
+
+    clean_text = "\n".join(dict.fromkeys(effective_lines)).strip() + "\n"
     return clean_text
 
 
