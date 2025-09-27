@@ -1,0 +1,23 @@
+﻿umg:
+  host: "192.168.1.30"
+  http_port: 80
+  modbus_port: 502
+  timeout_s: 3
+  registers:
+    power_active_total: 19026
+    power_reactive_total: 19042
+    power_apparent_total: 19034
+    energy_active_import: 19062
+    energy_active_export: 19070
+    energy_reactive_import: 19094
+    energy_reactive_export: 19102
+    voltage_l1: 19000
+    voltage_l2: 19002
+    voltage_l3: 19004
+    current_l1: 19012
+    current_l2: 19014
+    current_l3: 19016
+    frequency: 19050
+    power_factor: 19636
+    thd_voltage_l1: 19110
+    thd_current_l1: 19116

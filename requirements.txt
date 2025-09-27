@@ -1,2 +1,7 @@
+﻿pymodbus==3.6.8
+pandas>=2.1
+numpy>=1.26
+pyyaml>=6.0
+python-dotenv>=1.0
 psutil>=5.9
 requests>=2.31.0

@@ -1,15 +1,23 @@
-﻿"""Command line interface for VPN control and Janitza health checks."""
+﻿"""Command line interface for VPN control, Janitza health, and polling."""
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from typing import Callable, Dict
 
+from dotenv import load_dotenv
+
 from . import settings
-from .janitza_client import JanitzaUMG
+from .janitza_client import JanitzaUMG, load_umg_config
+from .poll import poll_loop, poll_once
 from .vpn_connection import VPNConnection
+
+load_dotenv()
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _configure_logging() -> None:
@@ -48,28 +56,71 @@ def _run_vpn_command(action: str) -> Dict[str, object]:
 
 
 def _run_umg_health() -> Dict[str, object]:
-    client = JanitzaUMG()
-    return client.health()
+    _configure_logging()
+    cfg = load_umg_config()
+    client = JanitzaUMG(
+        host=cfg.get("host"),
+        http_port=cfg.get("http_port"),
+        modbus_port=cfg.get("modbus_port"),
+        timeout_s=cfg.get("timeout_s"),
+        registers=cfg.get("registers"),
+    )
+    payload = client.health()
+    return payload
+
+
+def _run_poll_once() -> Dict[str, object]:
+    _configure_logging()
+    return poll_once()
+
+
+def _run_poll_loop(minutes: float, cycles: int | None) -> None:
+    _configure_logging()
+    interval_s = max(1, int(minutes * 60))
+    poll_loop(interval_s=interval_s, cycles=cycles)
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    commands: Dict[str, Callable[[], Dict[str, object]]] = {
-        "vpn-start": lambda: _run_vpn_command("start"),
-        "vpn-stop": lambda: _run_vpn_command("stop"),
-        "vpn-status": lambda: _run_vpn_command("status"),
-        "umg-health": _run_umg_health,
-    }
+    parser = argparse.ArgumentParser(prog="python -m app")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    if not argv or argv[0] not in commands:
-        sys.stderr.write(
-            "Usage: python -m app [vpn-start|vpn-stop|vpn-status|umg-health]\n"
-        )
+    subparsers.add_parser("vpn-start")
+    subparsers.add_parser("vpn-stop")
+    subparsers.add_parser("vpn-status")
+    subparsers.add_parser("umg-health")
+    subparsers.add_parser("poll-once")
+
+    poll_loop_parser = subparsers.add_parser("poll-loop")
+    poll_loop_parser.add_argument("--minutes", type=float, default=1.0)
+    poll_loop_parser.add_argument("--cycles", type=int, default=1)
+
+    args = parser.parse_args(argv)
+
+    try:
+        if args.command == "vpn-start":
+            result = _run_vpn_command("start")
+            _print_json(result)
+        elif args.command == "vpn-stop":
+            result = _run_vpn_command("stop")
+            _print_json(result)
+        elif args.command == "vpn-status":
+            result = _run_vpn_command("status")
+            _print_json(result)
+        elif args.command == "umg-health":
+            result = _run_umg_health()
+            _print_json(result)
+        elif args.command == "poll-once":
+            result = _run_poll_once()
+            _print_json(result)
+        elif args.command == "poll-loop":
+            cycles = args.cycles if args.cycles and args.cycles > 0 else None
+            _run_poll_loop(minutes=args.minutes, cycles=cycles)
+        else:  # pragma: no cover
+            parser.error(f"Unknown command {args.command}")
+    except Exception as exc:  # pragma: no cover - runtime failures
+        logging.getLogger(__name__).exception("Command failed: %s", exc)
+        sys.stderr.write(f"Error: {exc}\n")
         return 1
-
-    action = argv[0]
-    result = commands[action]()
-    _print_json(result)
     return 0
 
 
