@@ -187,8 +187,10 @@ class VPNConnection:
             if "TAP" in upper_iface or "TUN" in upper_iface or "OPENVPN" in upper_iface:
                 for addr in addrs:
                     if addr.family == socket.AF_INET:
-                        return addr.address
-        self._logger.warning("VPN IP not found — check if OpenVPN tunnel is up.")
+                        ip_addr = getattr(addr, "address", None)
+                        if ip_addr and not ip_addr.startswith(("0.", "169.254.")):
+                            return ip_addr
+        self._logger.warning("VPN IP not found - check if OpenVPN tunnel is up.")
         return None
 
     def _ping_host(self, host: str, timeout_ms: int = 1000) -> bool:

@@ -86,6 +86,7 @@ class OpenVPNManager:
     def start(self, profile_name: str) -> Dict[str, Optional[int]]:
         """Launch the GUI connection for the provided profile."""
         gui_path = self.find_openvpn_gui()
+        self._ensure_interactive_service()
 
         if self.is_running(profile_name):
             self._logger.info("Profile %s already active, reconnecting", profile_name)
@@ -154,6 +155,55 @@ class OpenVPNManager:
         """Determine whether the given profile has an active openvpn.exe process."""
         process = self._locate_profile_process(profile_name)
         return process is not None
+
+    def _ensure_interactive_service(self) -> None:
+        """Ensure the OpenVPN interactive service is running before GUI commands."""
+        if os.name != "nt":
+            return
+        service_name = "OpenVPNServiceInteractive"
+        try:
+            service = psutil.win_service_get(service_name)  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover - platform specific
+            self._logger.debug("Interactive service lookup failed: %s", exc)
+            return
+        try:
+            status = service.status().lower()
+        except Exception as exc:  # pragma: no cover - defensive
+            self._logger.debug("Interactive service status unavailable: %s", exc)
+            return
+        if status == "running":
+            return
+        self._logger.info("Starting %s service", service_name)
+        result = subprocess.run(
+            ["sc", "start", service_name],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            check=False,
+        )
+        if result.returncode != 0:
+            message = (
+                f"Failed to start {service_name}. Run the VPN orchestrator with administrative privileges "
+                "or start the service manually from Services.msc. "
+                f"Command output: {result.stderr.strip() or result.stdout.strip()}"
+            )
+            self._logger.error(message)
+            raise RuntimeError(message)
+        for _ in range(10):
+            time.sleep(1)
+            try:
+                if service.status().lower() == "running":
+                    self._logger.info("%s service is running", service_name)
+                    return
+            except Exception as exc:  # pragma: no cover - defensive
+                self._logger.debug("Service status poll failed: %s", exc)
+                break
+        message = (
+            f"Timed out waiting for {service_name} to report RUNNING. Verify the service is not disabled "
+            "and that you have administrator rights."
+        )
+        self._logger.error(message)
+        raise RuntimeError(message)
 
     def get_profile_pid(self, profile_name: str) -> Optional[int]:
         """Return the PID of the openvpn.exe process that serves ``profile_name``."""
