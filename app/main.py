@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import settings
 from .janitza_client import JanitzaUMG, REGISTER_UNITS, load_umg_config
-from .poll import BACKGROUND_POLLER, poll_once
+from .poll import BACKGROUND_POLLER, aligned_poll_once
 from .vpn_connection import VPNConnection
 
 LOGGER = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ async def index(request: Request) -> HTMLResponse:
 @app.post("/run")
 async def run_poll() -> JSONResponse:
     try:
-        result = await run_in_threadpool(poll_once)
+        result = await run_in_threadpool(aligned_poll_once)
     except Exception as exc:  # pragma: no cover - runtime errors
         LOGGER.exception("Polling failed: %s", exc)
         return JSONResponse(status_code=500, content={"error": str(exc)})
@@ -132,6 +132,7 @@ async def start_poll(interval: float = 1.0) -> JSONResponse:
             BACKGROUND_POLLER.start,
             interval_s=int(max(1, interval * 60)),
             cycles=None,
+            align_to_minute=True,
         )
     except RuntimeError as exc:
         return JSONResponse(status_code=409, content={"error": str(exc)})
@@ -146,6 +147,7 @@ async def run_loop(minutes: float = 5.0, interval: float = 1.0) -> JSONResponse:
             BACKGROUND_POLLER.start,
             interval_s=int(max(1, interval * 60)),
             cycles=cycles,
+            align_to_minute=True,
         )
     except RuntimeError as exc:
         return JSONResponse(status_code=409, content={"error": str(exc)})

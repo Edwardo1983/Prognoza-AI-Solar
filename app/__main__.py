@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from . import settings
 from .janitza_client import JanitzaUMG, load_umg_config
-from .poll import poll_loop, poll_once
+from .poll import aligned_poll_once, poll_loop
 from .vpn_connection import VPNConnection
 
 load_dotenv()
@@ -71,13 +71,13 @@ def _run_umg_health() -> Dict[str, object]:
 
 def _run_poll_once() -> Dict[str, object]:
     _configure_logging()
-    return poll_once()
+    return aligned_poll_once()
 
 
 def _run_poll_loop(minutes: float, cycles: int | None) -> None:
     _configure_logging()
     interval_s = max(1, int(minutes * 60))
-    poll_loop(interval_s=interval_s, cycles=cycles)
+    poll_loop(interval_s=interval_s, cycles=cycles, align_to_minute=True)
 
 
 def main(argv: list[str] | None = None) -> int:

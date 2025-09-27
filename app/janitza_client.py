@@ -140,9 +140,19 @@ class JanitzaUMG:
             return None
         return float(np.float32(value))
 
-    def export_csv(self, values: Dict[str, Optional[float]], path: Optional[Path] = None) -> Tuple[Dict[str, object], Path]:
+
+    def export_csv(
+        self,
+        values: Dict[str, Optional[float]],
+        path: Optional[Path] = None,
+        timestamp_override: Optional[datetime] = None,
+    ) -> Tuple[Dict[str, object], Path]:
         """Append readings to a daily CSV and return the stored row."""
-        timestamp = datetime.now(timezone.utc).astimezone()
+        timestamp = timestamp_override or datetime.now(timezone.utc).astimezone()
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc).astimezone()
+        else:
+            timestamp = timestamp.astimezone()
         timestamp_str = timestamp.isoformat()
 
         exports_dir = Path(path) if path else settings.EXPORTS_DIR
@@ -152,7 +162,12 @@ class JanitzaUMG:
         if csv_path.exists():
             try:
                 head = pd.read_csv(csv_path, usecols=["timestamp"], nrows=1)
-                first_ts = datetime.fromisoformat(str(head.iloc[0]["timestamp"]))
+                first_raw = str(head.iloc[0]["timestamp"])
+                first_ts = datetime.fromisoformat(first_raw)
+                if first_ts.tzinfo is None:
+                    first_ts = first_ts.replace(tzinfo=timezone.utc).astimezone(timestamp.tzinfo)
+                else:
+                    first_ts = first_ts.astimezone(timestamp.tzinfo)
             except Exception:  # pragma: no cover
                 first_ts = timestamp
         else:
@@ -176,6 +191,7 @@ class JanitzaUMG:
             index=False,
         )
         return row, csv_path
+
 
 
 def load_umg_config() -> Dict[str, object]:
