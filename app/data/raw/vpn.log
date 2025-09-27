@@ -1,61 +1,18 @@
-2025-09-27 13:44:10,334 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO.ovpn
-2025-09-27 13:44:10,369 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=18004)
-2025-09-27 13:44:12,396 INFO app.vpn_connection Obtained VPN interface IP 169.254.90.154
-2025-09-27 13:44:16,404 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
-2025-09-27 13:44:22,384 INFO app.vpn_connection UMG health attempt 2: ping=False tcp=False
-2025-09-27 13:44:29,387 INFO app.vpn_connection UMG health attempt 3: ping=False tcp=False
-2025-09-27 13:44:37,897 INFO app.vpn_connection UMG health attempt 4: ping=False tcp=False
-2025-09-27 13:44:48,380 INFO app.vpn_connection UMG health attempt 5: ping=False tcp=False
-2025-09-27 13:45:02,386 INFO app.vpn_connection UMG health attempt 6: ping=False tcp=False
-2025-09-27 13:47:20,841 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO-clean.ovpn
-2025-09-27 13:47:20,874 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=19264)
-2025-09-27 13:47:22,896 INFO app.vpn_connection Obtained VPN interface IP 192.168.255.10
-2025-09-27 13:47:28,883 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
-2025-09-27 13:47:34,885 INFO app.vpn_connection UMG health attempt 2: ping=False tcp=False
-2025-09-27 13:47:41,898 INFO app.vpn_connection UMG health attempt 3: ping=False tcp=False
-2025-09-27 13:47:50,394 INFO app.vpn_connection UMG health attempt 4: ping=False tcp=False
-2025-09-27 13:48:00,897 INFO app.vpn_connection UMG health attempt 5: ping=False tcp=False
-2025-09-27 13:55:57,041 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO-clean.ovpn
-2025-09-27 13:55:57,074 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=16724)
-2025-09-27 13:55:59,101 INFO app.vpn_connection Obtained VPN interface IP 192.168.255.10
-2025-09-27 13:56:05,393 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
-2025-09-27 13:56:51,037 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO-clean.ovpn
-2025-09-27 13:56:51,069 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=19556)
-2025-09-27 13:56:53,098 INFO app.vpn_connection Obtained VPN interface IP 169.254.90.154
-2025-09-27 13:56:56,894 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
-2025-09-27 13:57:16,257 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO-clean.ovpn
-2025-09-27 13:57:16,292 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=12452)
-2025-09-27 13:57:18,318 INFO app.vpn_connection Obtained VPN interface IP 169.254.90.154
-2025-09-27 13:57:22,393 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
-2025-09-27 13:57:39,706 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO-clean.ovpn
-2025-09-27 13:57:39,739 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=8328)
-2025-09-27 13:57:41,768 INFO app.vpn_connection Obtained VPN interface IP 169.254.90.154
-2025-09-27 13:57:45,398 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
-2025-09-27 13:57:51,400 INFO app.vpn_connection UMG health attempt 2: ping=False tcp=False
-2025-09-27 13:57:58,395 INFO app.vpn_connection UMG health attempt 3: ping=False tcp=False
-2025-09-27 13:59:36,778 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO-clean.ovpn
-2025-09-27 13:59:36,811 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=12400)
-2025-09-27 13:59:38,846 INFO app.vpn_connection Obtained VPN interface IP 169.254.90.154
-2025-09-27 13:59:42,895 INFO app.vpn_connection UMG health attempt 1: ping=False tcp=False
-2025-09-27 13:59:48,899 INFO app.vpn_connection UMG health attempt 2: ping=False tcp=False
-2025-09-27 13:59:55,884 INFO app.vpn_connection UMG health attempt 3: ping=False tcp=False
-2025-09-27 14:00:04,392 INFO app.vpn_connection UMG health attempt 4: ping=False tcp=False
-2025-09-27 14:05:32,215 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\Prognoza-UMG-509-PRO-clean.ovpn
-2025-09-27 14:05:32,221 INFO app.vpn_connection Starting OpenVPNServiceInteractive service
-2025-09-27 14:05:32,270 ERROR app.vpn_connection Failed to start OpenVPNServiceInteractive. Run the VPN orchestrator with administrative privileges or start the service manually from Services.msc. Command output: [SC] StartService: OpenService FAILED 5:
-
-Access is denied.
-2025-09-27 14:05:32,274 ERROR app.vpn_connection Connection routine failed: Failed to start OpenVPNServiceInteractive. Run the VPN orchestrator with administrative privileges or start the service manually from Services.msc. Command output: [SC] StartService: OpenService FAILED 5:
-
-Access is denied.
-Traceback (most recent call last):
-  File "C:\Users\Opaop\Desktop\Prognoza-AI-Solar\app\vpn_connection.py", line 63, in connect
-    launch_info = self._manager.start(self._profile_name)
-  File "C:\Users\Opaop\Desktop\Prognoza-AI-Solar\app\openvpn_manager.py", line 89, in start
-    self._ensure_interactive_service()
-  File "C:\Users\Opaop\Desktop\Prognoza-AI-Solar\app\openvpn_manager.py", line 191, in _ensure_interactive_service
-    raise RuntimeError(message)
-RuntimeError: Failed to start OpenVPNServiceInteractive. Run the VPN orchestrator with administrative privileges or start the service manually from Services.msc. Command output: [SC] StartService: OpenService FAILED 5:
-
-Access is denied.
-2025-09-27 14:07:39,315 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:08,730 INFO app.vpn_connection Prepared profile at C:\Users\Opaop\OpenVPN\config\eduard.ordean@el-mont.ro-Brezoaia-PT-clean.ovpn
+2025-09-27 15:39:08,772 INFO app.vpn_connection Issued connect command via C:\Program Files\OpenVPN\bin\openvpn-gui.exe (pid=19964)
+2025-09-27 15:39:10,816 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:12,823 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:15,844 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:20,363 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:27,124 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:37,141 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:47,159 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:39:57,172 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:40:07,193 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
+2025-09-27 15:40:17,208 INFO app.vpn_connection Obtained VPN interface IP 192.168.255.10
+2025-09-27 15:40:17,897 INFO app.vpn_connection UMG health attempt 1: ping=True tcp=True
+2025-09-27 15:40:17,897 INFO app.vpn_connection VPN connected: ip=192.168.255.10 ping=True tcp=True pid=20444
+2025-09-27 15:40:26,001 INFO app.vpn_connection UMG health attempt 1: ping=True tcp=True
+2025-09-27 15:40:31,371 INFO app.vpn_connection Disconnect command sent for profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean
+2025-09-27 15:40:34,944 INFO app.vpn_connection Profile eduard.ordean@el-mont.ro-Brezoaia-PT-clean disconnected
+2025-09-27 15:40:34,978 WARNING app.vpn_connection VPN IP not found - check if OpenVPN tunnel is up.
