@@ -1,0 +1,150 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="status-grid">
+  <div class="card">
+    <h2>VPN Status</h2>
+    <p><strong>Connected:</strong> <span id="vpn-status">{{ vpn_status.is_connected }}</span></p>
+    <p><strong>IP:</strong> <span id="vpn-ip">{{ vpn_status.vpn_ip or 'N/A' }}</span></p>
+    <p><strong>PID:</strong> <span id="vpn-pid">{{ vpn_status.pid or 'N/A' }}</span></p>
+  </div>
+  <div class="card">
+    <h2>Latest Health Probe</h2>
+    <p><strong>Reachable:</strong> <span id="health-reachable">{{ health.reachable }}</span></p>
+    <p><strong>HTTP (ms):</strong> <span id="health-http">{{ health.http_ms or 'N/A' }}</span></p>
+    <p><strong>Modbus (ms):</strong> <span id="health-modbus">{{ health.modbus_ms or 'N/A' }}</span></p>
+  </div>
+</div>
+
+<div class="actions">
+  <button id="run-once">Run once</button>
+  <button id="check-health">Check health</button>
+</div>
+
+<div id="messages"></div>
+
+<section>
+  <h2>Most Recent Reading</h2>
+  {% if latest_row %}
+  <p>Source CSV: <code id="csv-path">{{ latest_file }}</code></p>
+  <table id="readings">
+    <thead>
+      <tr>
+        <th>Metric</th>
+        <th>Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for key, value in latest_row.items() %}
+      <tr>
+        <td>{{ key }}</td>
+        <td>{{ value }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p id="csv-path">No readings captured yet.</p>
+  <table id="readings">
+    <thead>
+      <tr><th>Metric</th><th>Value</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  {% endif %}
+</section>
+
+<script>
+  const runBtn = document.getElementById('run-once');
+  const healthBtn = document.getElementById('check-health');
+  const messages = document.getElementById('messages');
+  const vpnStatusEl = document.getElementById('vpn-status');
+  const vpnIpEl = document.getElementById('vpn-ip');
+  const vpnPidEl = document.getElementById('vpn-pid');
+  const healthReachableEl = document.getElementById('health-reachable');
+  const healthHttpEl = document.getElementById('health-http');
+  const healthModbusEl = document.getElementById('health-modbus');
+  const csvPathEl = document.getElementById('csv-path');
+  const readingsBody = document.querySelector('#readings tbody');
+
+  function setMessage(text, cls = '') {
+    messages.textContent = text || '';
+    messages.className = cls;
+  }
+
+  function updateTable(data) {
+    if (!readingsBody) return;
+    readingsBody.innerHTML = '';
+    Object.entries(data).forEach(([key, value]) => {
+      const row = document.createElement('tr');
+      const cellKey = document.createElement('td');
+      cellKey.textContent = key;
+      const cellValue = document.createElement('td');
+      cellValue.textContent = value;
+      row.appendChild(cellKey);
+      row.appendChild(cellValue);
+      readingsBody.appendChild(row);
+    });
+  }
+
+  async function refreshStatus() {
+    const response = await fetch('/status');
+    if (!response.ok) return;
+    const status = await response.json();
+    vpnStatusEl.textContent = status.is_connected;
+    vpnIpEl.textContent = status.vpn_ip || 'N/A';
+    vpnPidEl.textContent = status.pid || 'N/A';
+  }
+
+  async function handleRunOnce() {
+    setMessage('Running polling cycle...', '');
+    try {
+      const response = await fetch('/run', { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Polling failed');
+      }
+      setMessage('Polling completed successfully.', 'success');
+      if (payload.data) {
+        updateTable(payload.data);
+      }
+      if (payload.csv_path && csvPathEl) {
+        csvPathEl.textContent = payload.csv_path;
+      }
+      if (payload.health) {
+        updateHealth(payload.health);
+      }
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || 'Unexpected error', 'error');
+    } finally {
+      await refreshStatus();
+    }
+  }
+
+  function updateHealth(health) {
+    if (!health) return;
+    healthReachableEl.textContent = health.reachable;
+    healthHttpEl.textContent = health.http_ms ?? 'N/A';
+    healthModbusEl.textContent = health.modbus_ms ?? 'N/A';
+  }
+
+  async function handleHealth() {
+    setMessage('Running health probe...', '');
+    try {
+      const response = await fetch('/health');
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Health probe failed');
+      }
+      updateHealth(payload);
+      setMessage('Health probe completed.', 'success');
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || 'Unexpected error', 'error');
+    }
+  }
+
+  if (runBtn) runBtn.addEventListener('click', handleRunOnce);
+  if (healthBtn) healthBtn.addEventListener('click', handleHealth);
+</script>
+{% endblock %}
