@@ -6,10 +6,10 @@ import logging
 import math
 import socket
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -40,6 +40,26 @@ DEFAULT_REGISTERS: Dict[str, int] = {
     "power_factor": 19636,
     "thd_voltage_l1": 19110,
     "thd_current_l1": 19116,
+}
+
+REGISTER_UNITS: Dict[str, str] = {
+    "power_active_total": "W",
+    "power_reactive_total": "var",
+    "power_apparent_total": "VA",
+    "energy_active_import": "Wh",
+    "energy_active_export": "Wh",
+    "energy_reactive_import": "varh",
+    "energy_reactive_export": "varh",
+    "voltage_l1": "V",
+    "voltage_l2": "V",
+    "voltage_l3": "V",
+    "current_l1": "A",
+    "current_l2": "A",
+    "current_l3": "A",
+    "frequency": "Hz",
+    "power_factor": "PF",
+    "thd_voltage_l1": "%",
+    "thd_current_l1": "%",
 }
 
 
@@ -73,7 +93,7 @@ class JanitzaUMG:
         """Probe HTTP and Modbus ports returning latency metrics."""
         http_ms = self.tcp_ping(self.host, self.http_port, self.timeout_s)
         modbus_ms = self.tcp_ping(self.host, self.modbus_port, self.timeout_s)
-        reachable = modbus_ms is not None and (http_ms is not None or modbus_ms is not None)
+        reachable = modbus_ms is not None
         return {
             "http_ms": http_ms,
             "modbus_ms": modbus_ms,

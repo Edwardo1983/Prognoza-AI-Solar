@@ -13,11 +13,32 @@
     <p><strong>HTTP (ms):</strong> <span id="health-http">{{ health.http_ms or 'N/A' }}</span></p>
     <p><strong>Modbus (ms):</strong> <span id="health-modbus">{{ health.modbus_ms or 'N/A' }}</span></p>
   </div>
+  <div class="card">
+    <h2>Polling Worker</h2>
+    <p><strong>Running:</strong> <span id="poller-running">{{ poller_running }}</span></p>
+    {% if poller_last_payload %}
+    <p><strong>Last run:</strong> {{ poller_last_payload.data.timestamp }}</p>
+    {% else %}
+    <p>No background runs yet.</p>
+    {% endif %}
+  </div>
 </div>
 
 <div class="actions">
   <button id="run-once">Run once</button>
   <button id="check-health">Check health</button>
+</div>
+
+<div class="actions">
+  <span>Quick loops:</span>
+  {% for minutes in [5, 15, 60, 180, 360, 720, 1440] %}
+  <button class="loop-button" data-minutes="{{ minutes }}">{{ minutes }} min</button>
+  {% endfor %}
+</div>
+
+<div class="actions">
+  <button id="start-loop">Start (continuous)</button>
+  <button id="stop-loop">Stop</button>
 </div>
 
 <div id="messages"></div>
@@ -37,7 +58,7 @@
       {% for key, value in latest_row.items() %}
       <tr>
         <td>{{ key }}</td>
-        <td>{{ value }}</td>
+        <td>{% if units.get(key) %}{{ value }} {{ units.get(key) }}{% else %}{{ value }}{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -56,6 +77,9 @@
 <script>
   const runBtn = document.getElementById('run-once');
   const healthBtn = document.getElementById('check-health');
+  const loopButtons = document.querySelectorAll('.loop-button');
+  const startBtn = document.getElementById('start-loop');
+  const stopBtn = document.getElementById('stop-loop');
   const messages = document.getElementById('messages');
   const vpnStatusEl = document.getElementById('vpn-status');
   const vpnIpEl = document.getElementById('vpn-ip');
@@ -65,10 +89,17 @@
   const healthModbusEl = document.getElementById('health-modbus');
   const csvPathEl = document.getElementById('csv-path');
   const readingsBody = document.querySelector('#readings tbody');
+  const pollerRunningEl = document.getElementById('poller-running');
+  const units = {{ units_json | safe }};
 
   function setMessage(text, cls = '') {
     messages.textContent = text || '';
     messages.className = cls;
+  }
+
+  function formatValue(key, value) {
+    const unit = units && units[key] ? ` ${units[key]}` : '';
+    return `${value}${unit}`;
   }
 
   function updateTable(data) {
@@ -79,7 +110,7 @@
       const cellKey = document.createElement('td');
       cellKey.textContent = key;
       const cellValue = document.createElement('td');
-      cellValue.textContent = value;
+      cellValue.textContent = formatValue(key, value);
       row.appendChild(cellKey);
       row.appendChild(cellValue);
       readingsBody.appendChild(row);
@@ -93,6 +124,16 @@
     vpnStatusEl.textContent = status.is_connected;
     vpnIpEl.textContent = status.vpn_ip || 'N/A';
     vpnPidEl.textContent = status.pid || 'N/A';
+  }
+
+  async function refreshPoller() {
+    const response = await fetch('/poller');
+    if (!response.ok) return;
+    const payload = await response.json();
+    pollerRunningEl.textContent = payload.running;
+    if (payload.last_payload && payload.last_payload.data) {
+      updateTable(payload.last_payload.data);
+    }
   }
 
   async function handleRunOnce() {
@@ -118,6 +159,7 @@
       setMessage(error.message || 'Unexpected error', 'error');
     } finally {
       await refreshStatus();
+      await refreshPoller();
     }
   }
 
@@ -144,7 +186,69 @@
     }
   }
 
+  async function triggerLoop(minutes) {
+    setMessage(`Starting ${minutes} minute loop...`, '');
+    try {
+      const response = await fetch(`/run-loop?minutes=${minutes}`, { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to start loop');
+      }
+      setMessage(`Loop started for ${payload.total_minutes} minutes.`, 'success');
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || 'Unexpected error', 'error');
+    } finally {
+      await refreshPoller();
+    }
+  }
+
+  async function handleStart() {
+    setMessage('Starting continuous polling...', '');
+    try {
+      const response = await fetch('/start', { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to start polling');
+      }
+      setMessage('Continuous polling started.', 'success');
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || 'Unexpected error', 'error');
+    } finally {
+      await refreshPoller();
+    }
+  }
+
+  async function handleStop() {
+    setMessage('Stopping polling...', '');
+    try {
+      const response = await fetch('/stop', { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to stop polling');
+      }
+      setMessage(`Polling status: ${payload.status}`, 'success');
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || 'Unexpected error', 'error');
+    } finally {
+      await refreshPoller();
+      await refreshStatus();
+    }
+  }
+
   if (runBtn) runBtn.addEventListener('click', handleRunOnce);
   if (healthBtn) healthBtn.addEventListener('click', handleHealth);
+  loopButtons.forEach((btn) => {
+    btn.addEventListener('click', () => triggerLoop(btn.dataset.minutes));
+  });
+  if (startBtn) startBtn.addEventListener('click', handleStart);
+  if (stopBtn) stopBtn.addEventListener('click', handleStop);
+
+  refreshPoller();
+{% if poller_running %}
+  setInterval(refreshPoller, 30000);
+{% endif %}
 </script>
 {% endblock %}
