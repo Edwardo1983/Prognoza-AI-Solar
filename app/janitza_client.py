@@ -114,6 +114,41 @@ class JanitzaUMG:
         finally:
             client.close()
         return results
+    
+    def read_registers(self, retries: int = 3) -> Dict[str, Optional[float]]:
+        """Read configured holding registers as IEEE-754 floats with retries."""
+        attempts = max(1, retries)
+        last_error: Optional[Exception] = None
+        for attempt in range(attempts):
+            client = ModbusTcpClient(host=self.host, port=self.modbus_port, timeout=self.timeout_s)
+            try:
+                if not client.connect():
+                    raise ConnectionError(
+                        f"Unable to establish Modbus TCP session with {self.host}:{self.modbus_port}"
+                    )
+    
+                results: Dict[str, Optional[float]] = {}
+                for name, address in self.registers.items():
+                    value: Optional[float] = None
+                    for _ in range(2):
+                        value = self._read_float(client, address)
+                        if value is not None:
+                            break
+                        time.sleep(0.2)
+                    results[name] = value
+                return results
+            except Exception as exc:  # pragma: no cover - network resilience
+                LOGGER.warning("Modbus read attempt %s/%s failed: %s", attempt + 1, attempts, exc)
+                last_error = exc
+                time.sleep(1)
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+        raise ConnectionError(last_error or RuntimeError("Modbus read exhausted retries"))
+    
+    
 
     def _read_float(self, client: ModbusTcpClient, address: int) -> Optional[float]:
         try:

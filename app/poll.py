@@ -53,6 +53,7 @@ def _sleep_until(target_time: datetime, stop_event: Optional[Event] = None) -> N
             time.sleep(wait_for)
 
 
+
 def poll_once(target_time: Optional[datetime] = None) -> Dict[str, object]:
     """Ensure VPN is connected, read registers once, and disconnect if needed."""
     start_perf = time.perf_counter()
@@ -69,7 +70,11 @@ def poll_once(target_time: Optional[datetime] = None) -> Dict[str, object]:
 
     scheduled_time: Optional[datetime] = None
     if target_time is not None:
-        scheduled_time = target_time.astimezone() if target_time.tzinfo else target_time.replace(tzinfo=timezone.utc).astimezone()
+        scheduled_time = (
+            target_time.astimezone()
+            if target_time.tzinfo
+            else target_time.replace(tzinfo=timezone.utc).astimezone()
+        )
 
     try:
         umg_cfg = load_umg_config()
@@ -88,14 +93,26 @@ def poll_once(target_time: Optional[datetime] = None) -> Dict[str, object]:
         if scheduled_time is not None:
             _sleep_until(scheduled_time)
 
-        readings = client.read_registers()
+        try:
+            readings = client.read_registers()
+        except Exception as exc:
+            LOGGER.warning("Register read failed: %s", exc)
+            empty_values = {name: None for name in client.registers}
+            row, csv_path = client.export_csv(empty_values, timestamp_override=scheduled_time)
+            row["error"] = str(exc)
+            return {
+                "health": health,
+                "data": row,
+                "csv_path": str(csv_path),
+                "error": str(exc),
+            }
+
         row, csv_path = client.export_csv(readings, timestamp_override=scheduled_time)
-        payload = {
+        return {
             "health": health,
             "data": row,
             "csv_path": str(csv_path),
         }
-        return payload
     finally:
         duration = time.perf_counter() - start_perf
         _update_estimate(duration)
