@@ -136,7 +136,7 @@ def build_left_table(row: pd.Series) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def style_left_table(df: pd.DataFrame, status: str) -> pd.io.formats.style.Styler:
+def style_left_table(df: pd.DataFrame, status: str):
     def highlight(row):
         if status == "error":
             return ["background-color: #f8d7da; color:#721c24" for _ in row]
