@@ -1,7 +1,7 @@
 ﻿import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 import plotly.express as px
@@ -13,6 +13,19 @@ from app.poll import BACKGROUND_POLLER, aligned_poll_once
 from app.vpn_connection import VPNConnection
 
 st.set_page_config(page_title="UMG Streamlit Control", layout="wide")
+AUTO_REFRESH_SECONDS = 300
+now_ts = datetime.now().timestamp()
+next_refresh_key = "next_refresh_ts"
+if next_refresh_key not in st.session_state:
+    st.session_state[next_refresh_key] = now_ts + AUTO_REFRESH_SECONDS
+elif now_ts >= st.session_state[next_refresh_key]:
+    st.session_state[next_refresh_key] = now_ts + AUTO_REFRESH_SECONDS
+    st.experimental_rerun()
+
+
+def reset_auto_refresh():
+    st.session_state[next_refresh_key] = datetime.now().timestamp() + AUTO_REFRESH_SECONDS
+
 
 ROBOTO_CSS = """
 <style>
@@ -223,18 +236,21 @@ with col_run:
     if st.button("RUN", key="run_btn", help="Start continuous polling", disabled=BACKGROUND_POLLER.is_running(), use_container_width=True):
         try:
             BACKGROUND_POLLER.start(interval_s=60, cycles=None, align_to_minute=True)
+            reset_auto_refresh()
             st.toast("Continuous polling started", icon="✅")
         except RuntimeError as exc:
             st.toast(str(exc), icon="⚠️")
 with col_stop:
     if st.button("STOP", key="stop_btn", help="Stop background polling", disabled=not BACKGROUND_POLLER.is_running(), use_container_width=True):
         if BACKGROUND_POLLER.stop():
+            reset_auto_refresh()
             st.toast("Polling stopped", icon="🛑")
         else:
             st.toast("Polling was not running", icon="ℹ️")
 with col_health:
     if st.button("Check Health", key="health_btn", use_container_width=True):
         st.session_state["health"] = run_health_probe()
+        reset_auto_refresh()
 
 health = st.session_state["health"]
 
@@ -328,4 +344,5 @@ if BACKGROUND_POLLER.last_error:
     st.error(f"Last background error: {BACKGROUND_POLLER.last_error}")
 
 if st.button("Refresh", key="refresh_btn"):
+    reset_auto_refresh()
     st.experimental_rerun()
