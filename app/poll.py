@@ -103,11 +103,13 @@ def poll_once(target_time: Optional[datetime] = None) -> Dict[str, object]:
             vpn.disconnect()
 
 
+
 def poll_loop(
     interval_s: int = 60,
     cycles: Optional[int] = 1,
     *,
     callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    error_callback: Optional[Callable[[Exception], None]] = None,
     stop_event: Optional[Event] = None,
     align_to_minute: bool = False,
 ) -> None:
@@ -131,20 +133,28 @@ def poll_loop(
             if stop_event and stop_event.is_set():
                 break
 
-        payload = poll_once(target_time=target_time)
-
-        if callback:
-            callback(payload)
+        try:
+            payload = poll_once(target_time=target_time)
+        except Exception as exc:  # pragma: no cover
+            LOGGER.exception("Polling cycle failed: %s", exc)
+            if error_callback:
+                error_callback(exc)
+            elif callback:
+                callback({"error": str(exc), "timestamp": (target_time or _now()).isoformat()})
+            else:
+                print(json.dumps({"error": str(exc), "timestamp": (target_time or _now()).isoformat()}, indent=2, sort_keys=True))
         else:
-            print(json.dumps(payload, indent=2, sort_keys=True))
+            if callback:
+                callback(payload)
+            else:
+                print(json.dumps(payload, indent=2, sort_keys=True))
 
         executed += 1
         if cycles is not None and executed >= cycles:
             break
 
         if not align_to_minute:
-            sleep_total = interval_s
-            for _ in range(sleep_total):
+            for _ in range(interval_s):
                 if stop_event and stop_event.is_set():
                     return
                 time.sleep(1)
@@ -152,15 +162,19 @@ def poll_loop(
 
 def aligned_poll_once(interval_s: int = 60) -> Dict[str, object]:
     results: List[Dict[str, object]] = []
+    errors: List[Exception] = []
     poll_loop(
         interval_s=interval_s,
         cycles=1,
         callback=results.append,
+        error_callback=lambda exc: errors.append(exc),
         align_to_minute=True,
     )
-    if not results:
-        raise RuntimeError("Polling cancelled")
-    return results[0]
+    if results:
+        return results[0]
+    if errors:
+        raise errors[-1]
+    raise RuntimeError("Polling cancelled")
 
 
 class BackgroundPoller:
@@ -206,6 +220,10 @@ class BackgroundPoller:
 
     def _store_payload(self, payload: Dict[str, object]) -> None:
         self.last_payload = payload
+        self.last_error = None
+
+    def _store_error(self, exc: Exception) -> None:
+        self.last_error = str(exc)
 
     def _run(self, interval_s: int, cycles: Optional[int]) -> None:
         try:
@@ -213,6 +231,7 @@ class BackgroundPoller:
                 interval_s=interval_s,
                 cycles=cycles,
                 callback=self._store_payload,
+                error_callback=self._store_error,
                 stop_event=self._stop_event,
                 align_to_minute=self._align_to_minute,
             )
