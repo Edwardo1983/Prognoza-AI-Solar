@@ -1,6 +1,7 @@
-﻿import math
+﻿import logging
+import math
+import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -9,10 +10,11 @@ import streamlit as st
 
 from app import settings
 from app.janitza_client import REGISTER_UNITS, JanitzaUMG, load_umg_config
-from app.poll import BACKGROUND_POLLER, aligned_poll_once
+from app.poll import BACKGROUND_POLLER
 from app.vpn_connection import VPNConnection
 
 st.set_page_config(page_title="UMG Streamlit Control", layout="wide")
+logger = logging.getLogger(__name__)
 AUTO_REFRESH_SECONDS = 300
 now_ts = datetime.now().timestamp()
 next_refresh_key = "next_refresh_ts"
@@ -95,13 +97,71 @@ def read_daily_data(date: datetime | None = None) -> pd.DataFrame:
         if not files:
             return pd.DataFrame()
         csv_path = files[-1]
-    df = pd.read_csv(csv_path)
+    attempts = 5
+    for attempt in range(1, attempts + 1):
+        try:
+            df = pd.read_csv(csv_path)
+            break
+        except (PermissionError, pd.errors.EmptyDataError, OSError) as exc:
+            logger.warning(
+                "Failed to read %s on attempt %s/%s: %s",
+                csv_path,
+                attempt,
+                attempts,
+                exc,
+            )
+            if attempt == attempts:
+                logger.exception("Giving up reading %s after repeated errors", csv_path)
+                st.warning(
+                    f"Could not read data from {csv_path.name}. Displaying empty dataset.",
+                    icon="⚠️",
+                )
+                return pd.DataFrame()
+            time.sleep(0.2 * attempt)
     if df.empty:
         return df
-    df["timestamp"] = (
-        pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-            .dt.tz_convert(datetime.now().astimezone().tzinfo)
-    )
+    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+
+    try:
+        timestamps = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    except Exception:
+        logger.exception("Failed bulk conversion of timestamps in %s; falling back to per-row parsing", csv_path)
+
+        def _safe_parse(value):
+            if pd.isna(value):
+                return pd.NaT
+            if isinstance(value, datetime):
+                if value.tzinfo is None:
+                    return value.replace(tzinfo=timezone.utc)
+                return value.astimezone(timezone.utc)
+            if isinstance(value, (int, float)):
+                try:
+                    return datetime.fromtimestamp(value, tz=timezone.utc)
+                except OSError:
+                    return pd.NaT
+            value_str = str(value).strip()
+            if not value_str:
+                return pd.NaT
+            for fmt in (
+                "%Y-%m-%dT%H:%M:%S.%f%z",
+                "%Y-%m-%dT%H:%M:%S%z",
+                "%Y-%m-%d %H:%M:%S%z",
+                "%d-%m-%YT%H:%M:%S.%f%z",
+                "%d-%m-%YT%H:%M:%S%z",
+                "%d.%m.%Y %H:%M:%S%z",
+            ):
+                try:
+                    return datetime.strptime(value_str, fmt).astimezone(timezone.utc)
+                except ValueError:
+                    continue
+            parsed = pd.to_datetime(value_str, utc=True, errors="coerce")
+            if isinstance(parsed, pd.Timestamp) and not pd.isna(parsed):
+                return parsed.to_pydatetime()
+            return pd.NaT
+
+        timestamps = pd.Series([_safe_parse(val) for val in df["timestamp"]], dtype="datetime64[ns, UTC]")
+
+    df["timestamp"] = timestamps.dt.tz_convert(local_tz)
     if "status" not in df.columns:
         df["status"] = "ok"
     if "error" not in df.columns:
@@ -200,7 +260,16 @@ def format_signal_bars(latency_ms: Optional[float]) -> str:
 
 def refresh_status() -> Dict[str, object]:
     vpn = VPNConnection()
-    return vpn.status()
+    try:
+        return vpn.status()
+    except Exception as exc:
+        logger.exception("Failed to refresh VPN status")
+        return {
+            "is_connected": False,
+            "vpn_ip": None,
+            "pid": None,
+            "error": str(exc),
+        }
 
 
 def run_health_probe() -> Dict[str, object]:
@@ -265,10 +334,13 @@ with left_col:
     st.markdown("### VPN Status")
     vpn_box = st.container()
     with vpn_box:
+        if vpn_status.get("error"):
+            st.error(f"VPN status unavailable: {vpn_status['error']}")
         st.markdown(f"**Connected:** {'✅' if vpn_status.get('is_connected') else '❌'}")
         st.markdown(f"**VPN IP:** {vpn_status.get('vpn_ip') or 'N/A'}")
         st.markdown(f"**PID:** {vpn_status.get('pid') or 'N/A'}")
-        st.markdown(f"**Tunnel State:** {vpn_status.get('is_connected') and 'RUNNING' or 'STOPPED'}")
+        tunnel_state = "RUNNING" if vpn_status.get("is_connected") else "STOPPED"
+        st.markdown(f"**Tunnel State:** {tunnel_state}")
 
     st.markdown("### Teltonika RUT240")
     signal_html = format_signal_bars(health.get('modbus_ms'))
