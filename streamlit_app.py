@@ -1,7 +1,7 @@
 import logging
 import math
 import time
-import warnings
+
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
@@ -100,45 +100,13 @@ def read_daily_data(date: datetime | None = None) -> pd.DataFrame:
             return pd.DataFrame()
         csv_path = files[-1]
     attempts = 5
-    df = pd.DataFrame()
-    parse_warnings: list[warnings.WarningMessage] = []
-    last_exception: Exception | None = None
+
     for attempt in range(1, attempts + 1):
         try:
-            df = pd.read_csv(csv_path, encoding="utf-8-sig")
+            df = pd.read_csv(csv_path)
             break
-        except pd.errors.ParserError as exc:
-            last_exception = exc
-            logger.warning(
-                "Parser error while reading %s on attempt %s/%s: %s",
-                csv_path,
-                attempt,
-                attempts,
-                exc,
-            )
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always", category=pd.errors.ParserWarning)
-                try:
-                    df = pd.read_csv(
-                        csv_path,
-                        encoding="utf-8-sig",
-                        engine="python",
-                        on_bad_lines="skip",
-                    )
-                    parse_warnings = caught
-                    logger.info("Recovered %s with tolerant CSV parser", csv_path)
-                    break
-                except Exception as fallback_exc:
-                    last_exception = fallback_exc
-                    logger.warning(
-                        "Fallback parser failed for %s on attempt %s/%s: %s",
-                        csv_path,
-                        attempt,
-                        attempts,
-                        fallback_exc,
-                    )
         except (PermissionError, pd.errors.EmptyDataError, OSError) as exc:
-            last_exception = exc
+
             logger.warning(
                 "Failed to read %s on attempt %s/%s: %s",
                 csv_path,
@@ -146,47 +114,31 @@ def read_daily_data(date: datetime | None = None) -> pd.DataFrame:
                 attempts,
                 exc,
             )
-        if attempt == attempts:
-            logger.error(
-                "Giving up reading %s after repeated errors", csv_path, exc_info=last_exception
-            )
-            st.error(
-                f"Could not read data from {csv_path.name}. Displaying empty dataset.",
-                icon="❌",
-            )
-            return pd.DataFrame()
-        time.sleep(0.2 * attempt)
+
+            if attempt == attempts:
+                logger.exception("Giving up reading %s after repeated errors", csv_path)
+                st.warning(
+                    f"Could not read data from {csv_path.name}. Displaying empty dataset.",
+                    icon="⚠️",
+                )
+                return pd.DataFrame()
+            time.sleep(0.2 * attempt)
     if df.empty:
         return df
-
-    if parse_warnings:
-        skipped_rows = sum(
-            1 for w in parse_warnings if issubclass(w.category, pd.errors.ParserWarning)
-        )
-        if skipped_rows:
-            logger.warning("Skipped %s malformed rows from %s", skipped_rows, csv_path)
-            st.warning(
-                f"Skipped {skipped_rows} malformed rows from {csv_path.name}. Latest good data is displayed.",
-                icon="⚠️",
-            )
-
-    unnamed = [col for col in df.columns if str(col).startswith("Unnamed")]
-    if unnamed:
-        logger.info("Dropping unnamed columns from %s: %s", csv_path, unnamed)
-        df = df.drop(columns=unnamed)
-
-    if df.columns.duplicated().any():
-        df = df.loc[:, ~df.columns.duplicated()]
 
     local_tz = datetime.now().astimezone().tzinfo or timezone.utc
 
     try:
         timestamps = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     except Exception:
+
         logger.exception(
             "Failed bulk conversion of timestamps in %s; falling back to per-row parsing",
             csv_path,
         )
+
+        logger.exception("Failed bulk conversion of timestamps in %s; falling back to per-row parsing", csv_path)
+
 
         def _safe_parse(value):
             if pd.isna(value):
