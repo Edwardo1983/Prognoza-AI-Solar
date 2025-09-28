@@ -100,21 +100,6 @@ class JanitzaUMG:
             "reachable": reachable,
         }
 
-    def read_registers(self) -> Dict[str, Optional[float]]:
-        """Read configured holding registers as IEEE-754 floats."""
-        client = ModbusTcpClient(host=self.host, port=self.modbus_port, timeout=self.timeout_s)
-        if not client.connect():
-            raise ConnectionError(f"Unable to establish Modbus TCP session with {self.host}:{self.modbus_port}")
-
-        results: Dict[str, Optional[float]] = {}
-        try:
-            for name, address in self.registers.items():
-                value = self._read_float(client, address)
-                results[name] = value
-        finally:
-            client.close()
-        return results
-    
     def read_registers(self, retries: int = 3) -> Dict[str, Optional[float]]:
         """Read configured holding registers as IEEE-754 floats with retries."""
         attempts = max(1, retries)
@@ -126,7 +111,7 @@ class JanitzaUMG:
                     raise ConnectionError(
                         f"Unable to establish Modbus TCP session with {self.host}:{self.modbus_port}"
                     )
-    
+
                 results: Dict[str, Optional[float]] = {}
                 for name, address in self.registers.items():
                     value: Optional[float] = None
@@ -147,8 +132,6 @@ class JanitzaUMG:
                 except Exception:
                     pass
         raise ConnectionError(last_error or RuntimeError("Modbus read exhausted retries"))
-    
-    
 
     def _read_float(self, client: ModbusTcpClient, address: int) -> Optional[float]:
         try:
@@ -175,12 +158,14 @@ class JanitzaUMG:
             return None
         return float(np.float32(value))
 
-
     def export_csv(
         self,
         values: Dict[str, Optional[float]],
         path: Optional[Path] = None,
         timestamp_override: Optional[datetime] = None,
+        status: str = "ok",
+        error: Optional[str] = None,
+        extra: Optional[Dict[str, object]] = None,
     ) -> Tuple[Dict[str, object], Path]:
         """Append readings to a daily CSV and return the stored row."""
         timestamp = timestamp_override or datetime.now(timezone.utc).astimezone()
@@ -192,7 +177,7 @@ class JanitzaUMG:
 
         exports_dir = Path(path) if path else settings.EXPORTS_DIR
         exports_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = exports_dir / f"umg_readings_{timestamp.date().isoformat()}.csv"
+        csv_path = exports_dir / f"umg_readings_{timestamp.date().isoformat()}".csv
 
         if csv_path.exists():
             try:
@@ -217,7 +202,11 @@ class JanitzaUMG:
             **values,
             "elapsed_minutes": elapsed_minutes,
             "milestones": milestones,
+            "status": status,
+            "error": error or "",
         }
+        if extra:
+            row.update(extra)
 
         pd.DataFrame([row]).to_csv(
             csv_path,
@@ -226,7 +215,6 @@ class JanitzaUMG:
             index=False,
         )
         return row, csv_path
-
 
 
 def load_umg_config() -> Dict[str, object]:

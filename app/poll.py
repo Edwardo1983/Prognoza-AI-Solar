@@ -54,6 +54,7 @@ def _sleep_until(target_time: datetime, stop_event: Optional[Event] = None) -> N
 
 
 
+
 def poll_once(target_time: Optional[datetime] = None) -> Dict[str, object]:
     """Ensure VPN is connected, read registers once, and disconnect if needed."""
     start_perf = time.perf_counter()
@@ -93,37 +94,41 @@ def poll_once(target_time: Optional[datetime] = None) -> Dict[str, object]:
         if scheduled_time is not None:
             _sleep_until(scheduled_time)
 
+        actual_now = _now()
+        try:
+            readings = client.read_registers()
+        except Exception as exc:
+            LOGGER.warning("Register read failed: %s", exc)
+            empty_values = {name: None for name in client.registers}
+            row, csv_path = client.export_csv(
+                empty_values,
+                timestamp_override=scheduled_time,
+                status="error",
+                error=str(exc),
+                extra={"offset_seconds": round((actual_now - (scheduled_time or actual_now)).total_seconds(), 3)},
+            )
+            return {
+                "health": health,
+                "data": row,
+                "csv_path": str(csv_path),
+                "error": str(exc),
+            }
 
-actual_now = _now()
-try:
-    readings = client.read_registers()
-except Exception as exc:
-    LOGGER.warning("Register read failed: %s", exc)
-    empty_values = {name: None for name in client.registers}
-    empty_values["status"] = "error"
-    empty_values["error"] = str(exc)
-    empty_values["offset_seconds"] = round((actual_now - (scheduled_time or actual_now)).total_seconds(), 3)
-    row, csv_path = client.export_csv(empty_values, timestamp_override=scheduled_time)
-    return {
-        "health": health,
-        "data": row,
-        "csv_path": str(csv_path),
-        "error": str(exc),
-    }
-
-status = "ok"
-if any(value is None for value in readings.values()):
-    status = "partial"
-values_with_meta = dict(readings)
-values_with_meta["status"] = status
-values_with_meta["error"] = ""
-values_with_meta["offset_seconds"] = round((actual_now - (scheduled_time or actual_now)).total_seconds(), 3)
-row, csv_path = client.export_csv(values_with_meta, timestamp_override=scheduled_time)
-return {
-    "health": health,
-    "data": row,
-    "csv_path": str(csv_path),
-}
+        status = "ok"
+        if any(value is None for value in readings.values()):
+            status = "partial"
+        row, csv_path = client.export_csv(
+            readings,
+            timestamp_override=scheduled_time,
+            status=status,
+            error=None,
+            extra={"offset_seconds": round((actual_now - (scheduled_time or actual_now)).total_seconds(), 3)},
+        )
+        return {
+            "health": health,
+            "data": row,
+            "csv_path": str(csv_path),
+        }
     finally:
         duration = time.perf_counter() - start_perf
         _update_estimate(duration)
