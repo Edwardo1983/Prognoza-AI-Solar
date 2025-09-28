@@ -177,7 +177,7 @@ class JanitzaUMG:
 
         exports_dir = Path(path) if path else settings.EXPORTS_DIR
         exports_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = exports_dir / f"umg_readings_{timestamp.date().isoformat()}".csv
+        csv_path = exports_dir / f"umg_readings_{timestamp.date().isoformat()}.csv"
 
         if csv_path.exists():
             try:

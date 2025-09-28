@@ -98,7 +98,10 @@ def read_daily_data(date: datetime | None = None) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     if df.empty:
         return df
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(datetime.now().astimezone().tzinfo)
+    df["timestamp"] = (
+        pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+            .dt.tz_convert(datetime.now().astimezone().tzinfo)
+    )
     if "status" not in df.columns:
         df["status"] = "ok"
     if "error" not in df.columns:
@@ -186,19 +189,10 @@ def build_hour_table(df: pd.DataFrame, metrics: List[str], start: datetime) -> p
 
 
 def format_signal_bars(latency_ms: Optional[float]) -> str:
-    levels = 0
-    if latency_ms is None:
-        levels = 0
-    elif latency_ms < 150:
-        levels = 4
-    elif latency_ms < 250:
-        levels = 3
-    elif latency_ms < 400:
-        levels = 2
-    else:
-        levels = 1
+    thresholds = [150, 250, 400, float('inf')]
+    level = 0 if latency_ms is None else next((idx + 1 for idx, threshold in enumerate(thresholds) if latency_ms < threshold), 4)
     bars = ''.join(
-        f"<span class='signal-bar {'on' if i < levels else 'off'}'></span>"
+        f"<span class='signal-bar {'on' if i < level else 'off'}'></span>"
         for i in range(4)
     )
     return bars
